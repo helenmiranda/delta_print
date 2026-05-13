@@ -191,6 +191,9 @@ export default function FinanceDrawer({ quoteId, onClose, onUpdated }: FinanceDr
   const [viewerTitle, setViewerTitle] = useState('');
 
   const [payEditMode, setPayEditMode] = useState(false);
+  const [obsEditMode, setObsEditMode] = useState(false);
+  const [obsText, setObsText] = useState('');
+  const [savingObs, setSavingObs] = useState(false);
   const [payForm, setPayForm] = useState({
     forma_pagamento: '',
     condicoes_pagamento: '',
@@ -263,6 +266,7 @@ export default function FinanceDrawer({ quoteId, onClose, onUpdated }: FinanceDr
 
       if (pRes.data) {
         setPayForm(paymentToForm(pRes.data));
+        setObsText(pRes.data.observacoes_financeiro ?? '');
       }
 
       let resolvedApprovedVersion: QuoteVersion | null = null;
@@ -355,6 +359,28 @@ export default function FinanceDrawer({ quoteId, onClose, onUpdated }: FinanceDr
       message: payForm.forma_pagamento || null,
       author: activityAuthor,
     });
+    setActivitiesKey((k) => k + 1);
+  }
+
+  async function handleSaveObs() {
+    setSavingObs(true);
+    const { data: saved, error } = await supabase
+      .from('quote_payments')
+      .upsert(
+        { quote_id: quoteId, observacoes_financeiro: obsText.trim() || null, updated_at: new Date().toISOString() },
+        { onConflict: 'quote_id' }
+      )
+      .select('*')
+      .single();
+
+    setSavingObs(false);
+    if (error) { setToast('Erro ao salvar observação'); return; }
+    setPayment(saved);
+    setPayForm(paymentToForm(saved));
+    setObsText(saved.observacoes_financeiro ?? '');
+    setObsEditMode(false);
+    setToast('Observação salva');
+    logActivity({ quote_id: quoteId, action: 'OBSERVACAO_SALVA', author: activityAuthor });
     setActivitiesKey((k) => k + 1);
   }
 
@@ -993,6 +1019,75 @@ export default function FinanceDrawer({ quoteId, onClose, onUpdated }: FinanceDr
                     </div>
                   </section>
                 )}
+
+                {/* Observações */}
+                <section>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <ClipboardList className="w-3.5 h-3.5" />
+                      Observações
+                    </h3>
+                    {!obsEditMode && (
+                      <button
+                        onClick={() => setObsEditMode(true)}
+                        className="w-7 h-7 rounded-md flex items-center justify-center text-gray-400 hover:text-primary-500 hover:bg-primary-50 transition-all"
+                        title="Editar observações"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {obsEditMode ? (
+                    <div className="glass-card-static p-3 rounded-glass-sm space-y-2">
+                      <textarea
+                        value={obsText}
+                        onChange={(e) => setObsText(e.target.value)}
+                        rows={4}
+                        className="input-field-textarea w-full resize-none"
+                        placeholder="Adicione observações importantes sobre este orçamento..."
+                        disabled={savingObs}
+                        autoFocus
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setObsText(payment?.observacoes_financeiro ?? '');
+                            setObsEditMode(false);
+                          }}
+                          disabled={savingObs}
+                          className="flex-1 px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-all disabled:opacity-50"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          onClick={handleSaveObs}
+                          disabled={savingObs}
+                          className="flex-1 btn-primary text-sm disabled:opacity-50"
+                        >
+                          {savingObs ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                          {savingObs ? 'Salvando...' : 'Salvar'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      className="glass-card-static p-3 rounded-glass-sm cursor-pointer group hover:bg-white/60 transition-colors"
+                      onClick={() => setObsEditMode(true)}
+                      title="Clique para editar"
+                    >
+                      {payment?.observacoes_financeiro ? (
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+                          {payment.observacoes_financeiro}
+                        </p>
+                      ) : (
+                        <p className="text-sm text-gray-400 italic">
+                          Nenhuma observação. Clique para adicionar.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </section>
 
                 <section className="mt-6">
                   <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">

@@ -156,7 +156,13 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
   const [activitiesKey, setActivitiesKey] = useState(0);
   const [dragOverPdf, setDragOverPdf] = useState(false);
   const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [pedidoEditMode, setPedidoEditMode] = useState(false);
+  const [pedidoForm, setPedidoForm] = useState({ descricao_pedido: '', observacoes: '' });
+  const [savingPedido, setSavingPedido] = useState(false);
   const [showUploadArea, setShowUploadArea] = useState(false);
+  const [uploadMode, setUploadMode] = useState<'pdf' | 'manual'>('pdf');
+  const [manualText, setManualText] = useState('');
+  const [savingManual, setSavingManual] = useState(false);
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
   const [viewerTitle, setViewerTitle] = useState('');
   const [sendingPrintJob, setSendingPrintJob] = useState(false);
@@ -445,6 +451,106 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
     }
   }
 
+  async function handleSavePedido() {
+    if (!quote) return;
+    setSavingPedido(true);
+
+    const { error } = await supabase
+      .from('quotes')
+      .update({
+        descricao_pedido: pedidoForm.descricao_pedido.trim(),
+        observacoes: pedidoForm.observacoes.trim() || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', quote.id);
+
+    if (error) {
+      setToast('Erro ao salvar pedido');
+      setSavingPedido(false);
+      return;
+    }
+
+    setQuote((prev) => prev ? {
+      ...prev,
+      descricao_pedido: pedidoForm.descricao_pedido.trim(),
+      observacoes: pedidoForm.observacoes.trim() || null,
+    } : null);
+    setPedidoEditMode(false);
+    setSavingPedido(false);
+    setToast('Pedido atualizado');
+    onUpdated();
+    logActivity({
+      quote_id: quote.id,
+      action: 'PEDIDO_EDITADO',
+      author: activityAuthor,
+    });
+  }
+
+  async function handleManualVersion() {
+    if (!quote || !manualText.trim()) return;
+    setSavingManual(true);
+
+    const { data: maxVersionData } = await supabase
+      .from('quote_versions')
+      .select('version_number')
+      .eq('quote_id', quote.id)
+      .order('version_number', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const nextVersionNumber = maxVersionData ? maxVersionData.version_number + 1 : 1;
+
+    const { data: newVersion, error } = await supabase
+      .from('quote_versions')
+      .insert({
+        quote_id: quote.id,
+        version_number: nextVersionNumber,
+        pdf_url: null,
+        pdf_nome_original: null,
+        orcamento_numero: manualText.trim(),
+        status: 'ENVIADO',
+      })
+      .select('*, items:quote_version_items(*)')
+      .maybeSingle();
+
+    if (error || !newVersion) {
+      setToast('Erro ao salvar orçamento manual');
+      setSavingManual(false);
+      return;
+    }
+
+    await supabase
+      .from('quotes')
+      .update({ status: 'PRONTO_PARA_ENVIAR' })
+      .eq('id', quote.id);
+
+    const mapped: QuoteVersion = { ...newVersion, items: newVersion.items ?? [] };
+    const updatedVersions = [...versions, mapped];
+    setVersions(updatedVersions);
+    onVersionsLoaded?.(updatedVersions);
+    setQuote((prev) => prev ? { ...prev, status: 'PRONTO_PARA_ENVIAR' } : null);
+    setManualText('');
+    setShowUploadArea(false);
+    onUpdated();
+    setToast('Orçamento registrado com sucesso');
+
+    logActivity({
+      quote_id: quote.id,
+      action: 'UPLOAD_ORCAMENTO',
+      message: `Versão ${nextVersionNumber}: orçamento manual`,
+      entity_type: 'QUOTE_VERSION',
+      entity_id: String(newVersion.id),
+      author: activityAuthor,
+    });
+    logActivity({
+      quote_id: quote.id,
+      action: 'PRONTO_PARA_ENVIAR',
+      author: activityAuthor,
+    });
+
+    setSavingManual(false);
+  }
+
   async function handleApproval(data: ApprovalData) {
     if (!quote) return;
 
@@ -454,6 +560,7 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
         aprovado_descricao: data.descricao,
         aprovado_valor_total: data.valor,
         status: 'APROVADO_CLIENTE',
+        aprovado_em: new Date().toISOString(),
         ...(data.approved_quote_version_id
           ? { approved_quote_version_id: data.approved_quote_version_id }
           : {}),
@@ -979,34 +1086,103 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
                 <section>
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Pedido</h3>
-                    <button
-                      onClick={() => copyToClipboard(
-                        quote.descricao_pedido + (quote.observacoes ? `\n\nObs: ${quote.observacoes}` : '')
+                    <div className="flex items-center gap-2">
+                      {!pedidoEditMode && (
+                        <>
+                          <button
+                            onClick={() => copyToClipboard(
+                              quote.descricao_pedido + (quote.observacoes ? `\n\nObs: ${quote.observacoes}` : '')
+                            )}
+                            className="text-xs text-primary-400 hover:text-primary-600 flex items-center gap-1 transition-colors"
+                          >
+                            <Copy className="w-3 h-3" />
+                            Copiar
+                          </button>
+                          <button
+                            onClick={() => {
+                              setPedidoForm({
+                                descricao_pedido: quote.descricao_pedido,
+                                observacoes: quote.observacoes ?? '',
+                              });
+                              setPedidoEditMode(true);
+                            }}
+                            className="w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-primary-500 hover:bg-primary-50 transition-all"
+                            title="Editar pedido"
+                          >
+                            <ClipboardCopy className="w-3.5 h-3.5" />
+                          </button>
+                        </>
                       )}
-                      className="text-xs text-primary-400 hover:text-primary-600 flex items-center gap-1 transition-colors"
-                    >
-                      <Copy className="w-3 h-3" />
-                      Copiar pedido
-                    </button>
-                  </div>
-                  <div className="glass-card-static p-4 rounded-glass-sm space-y-3">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <FileText className="w-3.5 h-3.5 text-primary-400" />
-                        <span className="text-[11px] text-gray-400 uppercase tracking-wide">Descricao</span>
-                      </div>
-                      <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{quote.descricao_pedido}</p>
                     </div>
-                    {quote.observacoes && (
-                      <div className="pt-2 border-t border-gray-100/80">
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <MessageSquare className="w-3.5 h-3.5 text-primary-400" />
-                          <span className="text-[11px] text-gray-400 uppercase tracking-wide">Observacoes</span>
-                        </div>
-                        <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{quote.observacoes}</p>
-                      </div>
-                    )}
                   </div>
+
+                  {pedidoEditMode ? (
+                    <div className="glass-card-static p-4 rounded-glass-sm space-y-3">
+                      <div>
+                        <label className="block text-[11px] text-gray-400 uppercase tracking-wide mb-1.5">
+                          Descrição do pedido <span className="text-red-400">*</span>
+                        </label>
+                        <textarea
+                          value={pedidoForm.descricao_pedido}
+                          onChange={(e) => setPedidoForm((p) => ({ ...p, descricao_pedido: e.target.value }))}
+                          rows={4}
+                          className="input-field-textarea w-full resize-none"
+                          placeholder="Descreva os itens e serviços solicitados..."
+                          disabled={savingPedido}
+                          autoFocus
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-400 uppercase tracking-wide mb-1.5">
+                          Observações
+                        </label>
+                        <textarea
+                          value={pedidoForm.observacoes}
+                          onChange={(e) => setPedidoForm((p) => ({ ...p, observacoes: e.target.value }))}
+                          rows={2}
+                          className="input-field-textarea w-full resize-none"
+                          placeholder="Informações adicionais..."
+                          disabled={savingPedido}
+                        />
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          onClick={() => setPedidoEditMode(false)}
+                          disabled={savingPedido}
+                          className="flex-1 px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-all disabled:opacity-50"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          onClick={handleSavePedido}
+                          disabled={savingPedido || !pedidoForm.descricao_pedido.trim()}
+                          className="flex-1 btn-primary text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {savingPedido ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                          {savingPedido ? 'Salvando...' : 'Salvar'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="glass-card-static p-4 rounded-glass-sm space-y-3">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <FileText className="w-3.5 h-3.5 text-primary-400" />
+                          <span className="text-[11px] text-gray-400 uppercase tracking-wide">Descricao</span>
+                        </div>
+                        <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{quote.descricao_pedido}</p>
+                      </div>
+                      {quote.observacoes && (
+                        <div className="pt-2 border-t border-gray-100/80">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <MessageSquare className="w-3.5 h-3.5 text-primary-400" />
+                            <span className="text-[11px] text-gray-400 uppercase tracking-wide">Observacoes</span>
+                          </div>
+                          <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{quote.observacoes}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </section>
 
                 <QuoteArtFiles
@@ -1127,49 +1303,108 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
                     })()}
 
                     {showUploadArea && (
-                      <div
-                        onDragOver={handleDragOverPdf}
-                        onDragLeave={handleDragLeavePdf}
-                        onDrop={handleDropPdf}
-                        className={`relative border-2 border-dashed rounded-lg transition-all ${
-                          dragOverPdf
-                            ? 'border-primary-500 bg-primary-50/50'
-                            : 'border-gray-300 hover:border-primary-400 hover:bg-primary-50/30'
-                        } ${uploadingPdf ? 'pointer-events-none opacity-60' : ''}`}
-                      >
-                        <label className="flex flex-col items-center justify-center gap-2 p-5 cursor-pointer">
-                          {uploadingPdf ? (
-                            <>
-                              <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
-                              <div className="text-center">
-                                <span className="text-sm font-medium text-gray-700">Fazendo upload...</span>
-                                <p className="text-xs text-gray-500 mt-1">Por favor, aguarde</p>
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <Upload className={`w-7 h-7 ${dragOverPdf ? 'text-primary-500' : 'text-gray-400'}`} />
-                              <div className="text-center">
-                                <span className="text-sm font-medium text-gray-700">
-                                  Arraste o PDF ou clique para selecionar
-                                </span>
-                                <p className="text-xs text-gray-500 mt-1">
-                                  {versions.length > 0
-                                    ? `Sera criada a versao v${Math.max(...versions.map((v) => v.version_number)) + 1}`
-                                    : 'Sera criada a versao v1'}
-                                </p>
-                              </div>
-                            </>
-                          )}
-                          <input
-                            type="file"
-                            accept=".pdf"
-                            onChange={handlePdfFileChange}
-                            className="hidden"
-                            disabled={uploadingPdf}
-                          />
-                        </label>
-                        {versions.length > 0 && !uploadingPdf && (
+                      <div className="relative border border-gray-200 rounded-lg overflow-hidden">
+                        {/* Tabs PDF / Manual */}
+                        <div className="flex border-b border-gray-200">
+                          <button
+                            type="button"
+                            onClick={() => setUploadMode('pdf')}
+                            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold transition-colors ${
+                              uploadMode === 'pdf'
+                                ? 'bg-white text-primary-600 border-b-2 border-primary-500 -mb-px'
+                                : 'bg-gray-50 text-gray-500 hover:text-gray-700'
+                            }`}
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            Upload PDF
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setUploadMode('manual')}
+                            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold transition-colors ${
+                              uploadMode === 'manual'
+                                ? 'bg-white text-primary-600 border-b-2 border-primary-500 -mb-px'
+                                : 'bg-gray-50 text-gray-500 hover:text-gray-700'
+                            }`}
+                          >
+                            <ClipboardList className="w-3.5 h-3.5" />
+                            Digitar manualmente
+                          </button>
+                        </div>
+
+                        {/* Conteúdo da tab ativa */}
+                        {uploadMode === 'pdf' ? (
+                          <div
+                            onDragOver={handleDragOverPdf}
+                            onDragLeave={handleDragLeavePdf}
+                            onDrop={handleDropPdf}
+                            className={`relative transition-all ${
+                              dragOverPdf
+                                ? 'bg-primary-50/50'
+                                : uploadingPdf ? 'bg-gray-50' : 'hover:bg-primary-50/20'
+                            } ${uploadingPdf ? 'pointer-events-none opacity-60' : ''}`}
+                          >
+                            <label className="flex flex-col items-center justify-center gap-2 p-5 cursor-pointer">
+                              {uploadingPdf ? (
+                                <>
+                                  <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
+                                  <div className="text-center">
+                                    <span className="text-sm font-medium text-gray-700">Fazendo upload...</span>
+                                    <p className="text-xs text-gray-500 mt-1">Por favor, aguarde</p>
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <Upload className={`w-7 h-7 ${dragOverPdf ? 'text-primary-500' : 'text-gray-400'}`} />
+                                  <div className="text-center">
+                                    <span className="text-sm font-medium text-gray-700">
+                                      Arraste o PDF ou clique para selecionar
+                                    </span>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      {versions.length > 0
+                                        ? `Sera criada a versao v${Math.max(...versions.map((v) => v.version_number)) + 1}`
+                                        : 'Sera criada a versao v1'}
+                                    </p>
+                                  </div>
+                                </>
+                              )}
+                              <input
+                                type="file"
+                                accept=".pdf"
+                                onChange={handlePdfFileChange}
+                                className="hidden"
+                                disabled={uploadingPdf}
+                              />
+                            </label>
+                          </div>
+                        ) : (
+                          <div className="p-3 space-y-2">
+                            <textarea
+                              value={manualText}
+                              onChange={(e) => setManualText(e.target.value)}
+                              rows={4}
+                              className="input-field-textarea w-full resize-none"
+                              placeholder="Descreva o orçamento: itens, valores, condições..."
+                              disabled={savingManual}
+                            />
+                            <button
+                              type="button"
+                              onClick={handleManualVersion}
+                              disabled={savingManual || !manualText.trim()}
+                              className="btn-primary w-full disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {savingManual ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Send className="w-4 h-4" />
+                              )}
+                              {savingManual ? 'Salvando...' : 'Salvar e marcar pronto para envio'}
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Botão fechar */}
+                        {versions.length > 0 && !uploadingPdf && !savingManual && (
                           <button
                             onClick={() => setShowUploadArea(false)}
                             className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all"

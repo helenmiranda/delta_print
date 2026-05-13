@@ -27,6 +27,7 @@ interface Quote {
   cliente_telefone: string | null;
   status: string;
   created_at: string;
+  aprovado_em?: string | null;
   aprovado_valor_total?: number | null;
   aprovado_descricao?: string | null;
   observacoes?: string | null;
@@ -119,6 +120,7 @@ export default function QuotesPage({ setor }: QuotesPageProps) {
         cliente_telefone,
         status,
         created_at,
+        aprovado_em,
         aprovado_valor_total,
         aprovado_descricao,
         observacoes,
@@ -140,9 +142,13 @@ export default function QuotesPage({ setor }: QuotesPageProps) {
         order: Array.isArray(q.order) ? (q.order[0] ?? null) : (q.order ?? null),
       })) as Quote[];
       setQuotes(normalized);
-      const filteredAprovados = normalized.filter(
-        (q) => q.status === 'APROVADO_CLIENTE' || q.status === 'OS_GERADA'
-      );
+      const filteredAprovados = normalized
+        .filter((q) => q.status === 'APROVADO_CLIENTE' || q.status === 'OS_GERADA')
+        .sort((a, b) => {
+          const dateA = a.aprovado_em ?? a.created_at;
+          const dateB = b.aprovado_em ?? b.created_at;
+          return dateB.localeCompare(dateA);
+        });
       setAprovados(filteredAprovados);
     }
     setLoading(false);
@@ -580,6 +586,7 @@ export default function QuotesPage({ setor }: QuotesPageProps) {
           onCreated={handleCreated}
         />
       )}
+
 
       {selectedId !== null && (
         <QuoteDrawer
