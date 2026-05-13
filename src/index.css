@@ -1,0 +1,292 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-size: 13px;
+  }
+
+  body {
+    @apply bg-background font-sans text-gray-800 leading-relaxed;
+    min-height: 100vh;
+    font-size: 13px;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply text-gray-900 font-semibold leading-tight tracking-tight;
+  }
+
+  h1 { font-size: 1.385rem; }
+  h2 { font-size: 1.231rem; }
+  h3 { font-size: 1.077rem; }
+  h4 { font-size: 0.923rem; }
+}
+
+@layer components {
+  .glass-card {
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    border-radius: 8px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+  }
+
+  .glass-card:hover {
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  }
+
+  .glass-card-static {
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    border-radius: 8px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5
+           bg-primary-500 text-white font-semibold
+           rounded-glass-sm
+           transition-all duration-200 ease-in-out;
+    height: 32px;
+    padding: 0 12px;
+    font-size: 12.5px;
+    min-width: 0;
+  }
+
+  .btn-primary:hover {
+    @apply bg-primary-600;
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:active {
+    @apply bg-primary-700;
+    transform: translateY(0);
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-1.5
+           bg-white text-primary-500 font-semibold border border-primary-200
+           rounded-glass-sm
+           transition-all duration-200 ease-in-out;
+    height: 32px;
+    padding: 0 12px;
+    font-size: 12.5px;
+  }
+
+  .btn-secondary:hover {
+    @apply bg-primary-50 border-primary-300;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5
+           text-gray-600 font-medium
+           rounded-glass-sm
+           transition-all duration-200 ease-in-out;
+    height: 32px;
+    padding: 0 10px;
+    font-size: 12.5px;
+  }
+
+  .btn-ghost:hover {
+    @apply bg-white/60 text-gray-800;
+  }
+
+  .section-title {
+    @apply text-primary-500 font-semibold;
+    font-size: 0.923rem;
+  }
+
+  .text-body {
+    @apply text-gray-600 leading-relaxed;
+    font-size: 12px;
+  }
+
+  .input-field {
+    @apply w-full bg-white/70 border border-gray-200
+           rounded-glass-sm text-gray-800
+           placeholder:text-gray-400
+           transition-all duration-200
+           focus:outline-none focus:border-primary-300 focus:ring-2 focus:ring-primary-100;
+    backdrop-filter: blur(8px);
+    height: 32px;
+    padding: 0 10px;
+    font-size: 12.5px;
+  }
+
+  .input-field-textarea {
+    @apply w-full bg-white/70 border border-gray-200
+           rounded-glass-sm text-gray-800
+           placeholder:text-gray-400
+           transition-all duration-200
+           focus:outline-none focus:border-primary-300 focus:ring-2 focus:ring-primary-100;
+    backdrop-filter: blur(8px);
+    padding: 6px 10px;
+    font-size: 12.5px;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* ─── Global compact overrides ─── */
+
+/* Tables */
+table th {
+  font-size: 11px !important;
+  letter-spacing: 0.07em;
+  padding-top: 7px !important;
+  padding-bottom: 7px !important;
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+}
+
+table td {
+  font-size: 12.5px !important;
+  padding-top: 7px !important;
+  padding-bottom: 7px !important;
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+}
+
+/* Keep px-6 / py-4 that Tailwind applies to table cells at the component level
+   but make them smaller via the global rules above */
+
+/* Selects and text inputs */
+select,
+input[type="text"],
+input[type="search"],
+input[type="email"],
+input[type="number"],
+input[type="tel"] {
+  height: 32px;
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+  font-size: 12.5px !important;
+  border-radius: 7px;
+}
+
+textarea {
+  padding: 6px 10px !important;
+  font-size: 12.5px !important;
+  border-radius: 7px;
+}
+
+/* Page header sticky bar */
+.sticky .max-w-7xl,
+.sticky .max-w-full {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+/* Card padding reduction */
+.glass-card .p-6,
+.glass-card-static .p-6 {
+  padding: 14px 16px !important;
+}
+
+.glass-card .px-6,
+.glass-card-static .px-6 {
+  padding-left: 14px !important;
+  padding-right: 14px !important;
+}
+
+/* Reduce outer page vertical padding */
+.py-8 {
+  padding-top: 14px !important;
+  padding-bottom: 14px !important;
+}
+
+.py-6 {
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+}
+
+.mb-8 {
+  margin-bottom: 14px !important;
+}
+
+.mb-6 {
+  margin-bottom: 10px !important;
+}
+
+/* Page-title h1 inside sticky headers */
+.sticky h1 {
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em;
+}
+
+/* Logo inside sticky header */
+.sticky img {
+  width: 44px !important;
+  height: 44px !important;
+}
+
+/* Section labels / subtitles above tables */
+.text-xs {
+  font-size: 11px !important;
+}
+
+.text-sm {
+  font-size: 12.5px !important;
+}
+
+/* Ensure minimum click targets */
+button {
+  min-height: 28px;
+}
+
+/* ─── Responsive: ≤900px — filters wrap to 2 columns ─── */
+@media (max-width: 900px) {
+  .filter-grid {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .filter-grid > * {
+    width: 100%;
+  }
+
+  .overflow-x-auto table {
+    min-width: 600px;
+  }
+}
+
+@media (max-width: 600px) {
+  .filter-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ─── Legacy iframe-mode kept for compatibility but now a no-op ─── */
+.col-iframe-hide {
+  /* visible by default; hidden below can be toggled if needed */
+}
+
+@media (max-width: 1000px) {
+  .col-iframe-hide {
+    display: none;
+  }
+}
