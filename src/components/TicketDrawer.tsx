@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
   X, Loader2, Send, CheckCircle2, Clock, AlertCircle, User, Tag, MessageSquare, ChevronDown,
+  Paperclip, ExternalLink,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useChatwootUser } from '../contexts/ChatwootUserContext';
 import { useUser } from '../contexts/UserContext';
 
 interface TicketComment {
@@ -25,6 +27,8 @@ interface Ticket {
   resolvido_por_nome: string | null;
   resolvido_por_email: string | null;
   resolvido_em: string | null;
+  arquivo_url: string | null;
+  arquivo_nome_original: string | null;
   created_at: string;
 }
 
@@ -74,7 +78,11 @@ interface Props {
 }
 
 export default function TicketDrawer({ ticketId, onClose, onUpdated }: Props) {
-  const { user } = useUser();
+  const chatwootUser = useChatwootUser();
+  const { user: appUser } = useUser();
+  const userName = chatwootUser?.name ?? appUser.name;
+  const userEmail = chatwootUser?.email ?? appUser.email;
+
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [comments, setComments] = useState<TicketComment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,8 +112,8 @@ export default function TicketDrawer({ ticketId, onClose, onUpdated }: Props) {
 
     const updates: Record<string, unknown> = { status: newStatus };
     if (newStatus === 'resolvido') {
-      updates.resolvido_por_nome = user.name;
-      updates.resolvido_por_email = user.email;
+      updates.resolvido_por_nome = userName;
+      updates.resolvido_por_email = userEmail;
       updates.resolvido_em = new Date().toISOString();
     } else if (ticket.status === 'resolvido') {
       updates.resolvido_por_nome = null;
@@ -124,8 +132,8 @@ export default function TicketDrawer({ ticketId, onClose, onUpdated }: Props) {
     setSendingComment(true);
     await supabase.from('ticket_comments').insert({
       ticket_id: ticketId,
-      autor_nome: user.name,
-      autor_email: user.email,
+      autor_nome: userName,
+      autor_email: userEmail,
       conteudo: newComment.trim(),
     });
     setNewComment('');
@@ -209,6 +217,23 @@ export default function TicketDrawer({ ticketId, onClose, onUpdated }: Props) {
               <p className="text-xs font-medium text-gray-500 mb-2">Descrição</p>
               <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{ticket.descricao}</p>
             </div>
+
+            {/* Arquivo anexado */}
+            {ticket.arquivo_url && (
+              <div className="px-5 py-3 border-b border-gray-100">
+                <p className="text-xs font-medium text-gray-500 mb-2">Arquivo anexado</p>
+                <a
+                  href={ticket.arquivo_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-700 hover:bg-blue-100 transition-colors"
+                >
+                  <Paperclip className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate max-w-[240px]">{ticket.arquivo_nome_original ?? 'Arquivo'}</span>
+                  <ExternalLink className="w-3 h-3 shrink-0 opacity-60" />
+                </a>
+              </div>
+            )}
 
             {/* Info resolução */}
             {ticket.status === 'resolvido' && ticket.resolvido_em && (
