@@ -8,6 +8,7 @@ import PrePressPage from './pages/PrePressPage';
 import PrintProofsPage from './pages/PrintProofsPage';
 import ImpressaoExpressaPage from './pages/ImpressaoExpressaPage';
 import DesignKanban from './pages/DesignKanban';
+import TicketsPage from './pages/TicketsPage';
 
 function App() {
   return (
@@ -29,6 +30,8 @@ function App() {
               <Route path="/provas" element={<PrintProofsPage />} />
               {/* Rota do módulo Design Kanban */}
               <Route path="/design" element={<DesignKanban />} />
+              {/* Rota de Tickets */}
+              <Route path="/tickets" element={<TicketsPage />} />
             </Routes>
           </BrowserRouter>
         </ToastProvider>
