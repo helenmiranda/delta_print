@@ -237,7 +237,7 @@ export default function PrintProofDrawer({ proofId, onClose, onUpdated }: PrintP
                   <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
                     Arquivos da prova
                   </h3>
-                  <div className="glass-card-static p-4 rounded-glass-sm space-y-2">
+                  <div className="space-y-2">
                     {(proof.print_proof_files.length > 0
                       ? proof.print_proof_files.map((f) => ({ url: f.arquivo_url, nome: f.arquivo_nome_original }))
                       : [{ url: proof.arquivo_prova_url, nome: proof.arquivo_prova_nome_original }]
@@ -247,11 +247,11 @@ export default function PrintProofDrawer({ proofId, onClose, onUpdated }: PrintP
                         href={f.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-2 p-2.5 rounded-lg border border-gray-200 hover:bg-primary-50/30 hover:border-primary-300 transition-colors group"
+                        className="btn-primary w-full text-sm font-semibold"
                       >
-                        <Download className="w-4 h-4 text-primary-500 flex-shrink-0" />
-                        <span className="text-sm text-gray-700 truncate flex-1 group-hover:text-primary-600">
-                          {f.nome || f.url.split('/').pop()}
+                        <Download className="w-4 h-4 flex-shrink-0" />
+                        <span className="truncate">
+                          {f.nome || `Arquivo ${i + 1}`}
                         </span>
                       </a>
                     ))}
