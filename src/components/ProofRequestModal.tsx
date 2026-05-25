@@ -1,8 +1,13 @@
 import { useState, useEffect } from 'react';
-import { X, Upload, Loader2, FileText, Download, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, Upload, Loader2, FileText, Download, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { uploadFileToR2, R2UploadError } from '../lib/r2Upload';
 import { validateUploadFile, ACCEPT_ATTR } from '../lib/uploadValidation';
+
+interface UploadedFile {
+  url: string;
+  nome: string;
+}
 
 interface OrderOption {
   id: number;
@@ -21,8 +26,8 @@ interface ProofRequestModalProps {
 export default function ProofRequestModal({ orderId, onClose, onSuccess }: ProofRequestModalProps) {
   const [open, setOpen] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [uploadingFile, setUploadingFile] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploadingCount, setUploadingCount] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [orders, setOrders] = useState<OrderOption[]>([]);
@@ -39,8 +44,6 @@ export default function ProofRequestModal({ orderId, onClose, onSuccess }: Proof
     papel_tipo: 'COUCHE',
     papel_gramatura: '',
     papel_outros: '',
-    arquivo_prova_url: '',
-    arquivo_prova_nome_original: '',
     observacoes: '',
   });
 
@@ -81,12 +84,10 @@ export default function ProofRequestModal({ orderId, onClose, onSuccess }: Proof
     const validation = validateUploadFile(file);
     if (!validation.ok) {
       setUploadError(validation.errorMessage!);
-      setUploadStatus('error');
       return;
     }
 
-    setUploadingFile(true);
-    setUploadStatus('uploading');
+    setUploadingCount((c) => c + 1);
     setUploadError(null);
 
     try {
@@ -96,28 +97,18 @@ export default function ProofRequestModal({ orderId, onClose, onSuccess }: Proof
         tipo: 'PROVA',
         file,
       });
-
-      setForm((prev) => ({
-        ...prev,
-        arquivo_prova_url: publicUrl,
-        arquivo_prova_nome_original: file.name,
-      }));
-      setUploadStatus('done');
+      setUploadedFiles((prev) => [...prev, { url: publicUrl, nome: file.name }]);
     } catch (err) {
-      console.error('Error uploading proof file:', err);
       const msg = err instanceof R2UploadError ? err.message : 'Erro ao fazer upload do arquivo';
       setUploadError(msg);
-      setUploadStatus('error');
     }
 
-    setUploadingFile(false);
+    setUploadingCount((c) => c - 1);
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) {
-      uploadProofFile(file);
-    }
+    Array.from(e.target.files || []).forEach(uploadProofFile);
+    e.target.value = '';
   }
 
   function handleDragOver(e: React.DragEvent) {
@@ -136,11 +127,7 @@ export default function ProofRequestModal({ orderId, onClose, onSuccess }: Proof
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
-
-    const files = e.dataTransfer.files;
-    if (files && files[0]) {
-      uploadProofFile(files[0]);
-    }
+    Array.from(e.dataTransfer.files).forEach(uploadProofFile);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -161,8 +148,8 @@ export default function ProofRequestModal({ orderId, onClose, onSuccess }: Proof
       return;
     }
 
-    if (!form.arquivo_prova_url) {
-      alert('Arquivo da prova e obrigatorio');
+    if (uploadedFiles.length === 0) {
+      alert('Adicione ao menos um arquivo da prova');
       return;
     }
 
@@ -177,8 +164,8 @@ export default function ProofRequestModal({ orderId, onClose, onSuccess }: Proof
       ajuste: form.ajuste,
       formato: form.formato,
       papel_tipo: form.papel_tipo,
-      arquivo_prova_url: form.arquivo_prova_url,
-      arquivo_prova_nome_original: form.arquivo_prova_nome_original || null,
+      arquivo_prova_url: uploadedFiles[0].url,
+      arquivo_prova_nome_original: uploadedFiles[0].nome,
       observacoes: form.observacoes || null,
       status_prova: 'SOLICITADA',
     };
@@ -191,16 +178,29 @@ export default function ProofRequestModal({ orderId, onClose, onSuccess }: Proof
       payload.papel_gramatura = form.papel_gramatura || null;
     }
 
-    const { error } = await supabase.from('print_proofs').insert(payload);
+    const { data: proof, error } = await supabase
+      .from('print_proofs')
+      .insert(payload)
+      .select('id')
+      .single();
+
+    if (error || !proof) {
+      setSubmitting(false);
+      alert('Erro ao solicitar prova: ' + error?.message);
+      return;
+    }
+
+    await supabase.from('print_proof_files').insert(
+      uploadedFiles.map((f) => ({
+        print_proof_id: proof.id,
+        arquivo_url: f.url,
+        arquivo_nome_original: f.nome,
+      }))
+    );
 
     setSubmitting(false);
-
-    if (!error) {
-      onSuccess();
-      handleClose();
-    } else {
-      alert('Erro ao solicitar prova: ' + error.message);
-    }
+    onSuccess();
+    handleClose();
   }
 
   return (
@@ -473,39 +473,46 @@ export default function ProofRequestModal({ orderId, onClose, onSuccess }: Proof
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Arquivo da prova <span className="text-red-500">*</span>
+                Arquivos da prova <span className="text-red-500">*</span>
               </label>
               <p className="text-xs text-gray-500 mb-3">
-                Formatos aceitos: PDF, CDR, AI, PSD, JPG, PNG, ZIP, RAR, 7Z — máx. 350MB
+                Formatos aceitos: PDF, CDR, AI, PSD, JPG, PNG, ZIP, RAR, 7Z — máx. 2GB por arquivo
               </p>
 
-              {uploadStatus === 'error' && uploadError && (
-                <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
-                  <p className="text-sm text-red-700">{uploadError}</p>
+              {uploadedFiles.length > 0 && (
+                <div className="space-y-1.5 mb-3">
+                  {uploadedFiles.map((f, i) => (
+                    <div key={i} className="flex items-center justify-between px-3 py-2 bg-green-50 border border-green-200 rounded-lg gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
+                        <span className="text-xs text-green-800 truncate">{f.nome}</span>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <a
+                          href={f.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => setUploadedFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                          className="p-1 text-gray-400 hover:text-red-500 rounded transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
 
-              {uploadStatus === 'done' && form.arquivo_prova_url && (
-                <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-green-700 font-medium flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                      Arquivo enviado com sucesso
-                    </p>
-                    <p className="text-xs text-green-600 mt-1 truncate">
-                      {form.arquivo_prova_nome_original || form.arquivo_prova_url.split('/').pop()}
-                    </p>
-                  </div>
-                  <a
-                    href={form.arquivo_prova_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-shrink-0 p-2 text-green-600 hover:bg-green-100 rounded-lg transition-colors"
-                    title="Baixar arquivo"
-                  >
-                    <Download className="w-5 h-5" />
-                  </a>
+              {uploadError && (
+                <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+                  <p className="text-sm text-red-700">{uploadError}</p>
                 </div>
               )}
 
@@ -516,17 +523,19 @@ export default function ProofRequestModal({ orderId, onClose, onSuccess }: Proof
                 className={`relative border-2 border-dashed rounded-lg transition-all ${
                   dragOver
                     ? 'border-primary-500 bg-primary-50/50'
-                    : uploadStatus === 'error'
+                    : uploadError
                     ? 'border-red-300 hover:border-red-400'
                     : 'border-gray-300 hover:border-primary-400 hover:bg-primary-50/30'
-                } ${uploadingFile ? 'pointer-events-none opacity-60' : ''}`}
+                } ${uploadingCount > 0 ? 'pointer-events-none opacity-60' : ''}`}
               >
                 <label className="flex flex-col items-center justify-center gap-2 p-6 cursor-pointer">
-                  {uploadingFile ? (
+                  {uploadingCount > 0 ? (
                     <>
                       <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
                       <div className="text-center">
-                        <span className="text-sm font-medium text-gray-700">Enviando...</span>
+                        <span className="text-sm font-medium text-gray-700">
+                          Enviando {uploadingCount} arquivo{uploadingCount > 1 ? 's' : ''}...
+                        </span>
                         <p className="text-xs text-gray-500 mt-1">Por favor, aguarde</p>
                       </div>
                     </>
@@ -535,7 +544,7 @@ export default function ProofRequestModal({ orderId, onClose, onSuccess }: Proof
                       <Upload className={`w-8 h-8 ${dragOver ? 'text-primary-500' : 'text-gray-400'}`} />
                       <div className="text-center">
                         <span className="text-sm font-medium text-gray-700">
-                          {uploadStatus === 'done' ? 'Reenviar arquivo' : 'Enviar arquivo'}
+                          {uploadedFiles.length > 0 ? 'Adicionar mais arquivos' : 'Enviar arquivos'}
                         </span>
                         <p className="text-xs text-gray-500 mt-1">Arraste ou clique para selecionar</p>
                       </div>
@@ -545,8 +554,9 @@ export default function ProofRequestModal({ orderId, onClose, onSuccess }: Proof
                     type="file"
                     accept={ACCEPT_ATTR}
                     onChange={handleFileChange}
+                    multiple
                     className="hidden"
-                    disabled={uploadingFile}
+                    disabled={uploadingCount > 0}
                   />
                 </label>
               </div>
@@ -578,7 +588,7 @@ export default function ProofRequestModal({ orderId, onClose, onSuccess }: Proof
               <button
                 type="submit"
                 className="btn-primary flex-1"
-                disabled={submitting || uploadingFile}
+                disabled={submitting || uploadingCount > 0}
               >
                 {submitting ? (
                   <>

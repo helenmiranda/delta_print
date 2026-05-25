@@ -1,4 +1,4 @@
-export const MAX_UPLOAD_BYTES = 350 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
 export const ALLOWED_EXTENSIONS = [
   'pdf', 'jpg', 'jpeg', 'png', 'webp',
@@ -33,7 +33,7 @@ export function validateUploadFile(file: File): ValidationResult {
   if (file.size > MAX_UPLOAD_BYTES) {
     return {
       ok: false,
-      errorMessage: 'Arquivo muito grande. Máximo permitido: 350MB.',
+      errorMessage: 'Arquivo muito grande. Máximo permitido: 2GB.',
     };
   }
 

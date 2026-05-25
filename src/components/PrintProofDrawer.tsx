@@ -4,6 +4,12 @@ import { supabase } from '../lib/supabase';
 import StatusBadge from './StatusBadge';
 import Toast from './Toast';
 
+interface ProofFile {
+  id: string;
+  arquivo_url: string;
+  arquivo_nome_original: string | null;
+}
+
 interface PrintProofDetail {
   id: string;
   nome_prova: string;
@@ -21,6 +27,7 @@ interface PrintProofDetail {
   status_prova: string;
   created_at: string;
   updated_at: string;
+  print_proof_files: ProofFile[];
   order: {
     id: number;
     codigo_os: string;
@@ -87,6 +94,11 @@ export default function PrintProofDrawer({ proofId, onClose, onUpdated }: PrintP
           status_prova,
           created_at,
           updated_at,
+          print_proof_files (
+            id,
+            arquivo_url,
+            arquivo_nome_original
+          ),
           order:orders (
             id,
             codigo_os,
@@ -222,22 +234,27 @@ export default function PrintProofDrawer({ proofId, onClose, onUpdated }: PrintP
                 )}
 
                 <section>
-                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Arquivo da prova</h3>
-                  <div className="glass-card-static p-4 rounded-glass-sm">
-                    {proof.arquivo_prova_nome_original && (
-                      <p className="text-sm text-gray-700 mb-3 truncate" title={proof.arquivo_prova_nome_original}>
-                        {proof.arquivo_prova_nome_original}
-                      </p>
-                    )}
-                    <a
-                      href={proof.arquivo_prova_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn-primary text-sm w-full"
-                    >
-                      <Download className="w-4 h-4" />
-                      Baixar arquivo
-                    </a>
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                    Arquivos da prova
+                  </h3>
+                  <div className="glass-card-static p-4 rounded-glass-sm space-y-2">
+                    {(proof.print_proof_files.length > 0
+                      ? proof.print_proof_files.map((f) => ({ url: f.arquivo_url, nome: f.arquivo_nome_original }))
+                      : [{ url: proof.arquivo_prova_url, nome: proof.arquivo_prova_nome_original }]
+                    ).map((f, i) => (
+                      <a
+                        key={i}
+                        href={f.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 p-2.5 rounded-lg border border-gray-200 hover:bg-primary-50/30 hover:border-primary-300 transition-colors group"
+                      >
+                        <Download className="w-4 h-4 text-primary-500 flex-shrink-0" />
+                        <span className="text-sm text-gray-700 truncate flex-1 group-hover:text-primary-600">
+                          {f.nome || f.url.split('/').pop()}
+                        </span>
+                      </a>
+                    ))}
                   </div>
                 </section>
 
