@@ -73,6 +73,7 @@ interface QuoteDetail {
   aprovado_valor_total: number | null;
   approved_quote_version_id: string | null;
   conversa_id: string | null;
+  origem: string;
   created_at: string;
   updated_at: string;
   order?: QuoteDetailOrder | null;
@@ -170,6 +171,7 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deletingVersion, setDeletingVersion] = useState(false);
   const [sendingPdfVersion, setSendingPdfVersion] = useState<string | null>(null);
+  const [sendingPdfVendedor, setSendingPdfVendedor] = useState<string | null>(null);
   const [hasOpenQuestions, setHasOpenQuestions] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
@@ -847,6 +849,72 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
     setSendingPdfVersion(null);
   }
 
+  async function handleSendPdfToVendedor(version: QuoteVersion) {
+    if (!quote) return;
+
+    const pdfUrl = version.pdf_url;
+    const evolutionUrl = import.meta.env.VITE_EVOLUTION_API_URL;
+    const evolutionInstance = import.meta.env.VITE_EVOLUTION_INSTANCE;
+    const evolutionKey = import.meta.env.VITE_EVOLUTION_API_KEY;
+    const vendedorNumero = import.meta.env.VITE_VENDEDOR_WHATSAPP;
+
+    if (!pdfUrl) { setToast('Esta versão não possui PDF'); return; }
+    if (!evolutionUrl || !evolutionInstance || !evolutionKey || !vendedorNumero) {
+      setToast('Configuração da Evolution API incompleta. Verifique as variáveis de ambiente.');
+      return;
+    }
+
+    setSendingPdfVendedor(version.id);
+
+    try {
+      const fileName = version.pdf_nome_original ?? `orcamento-v${version.version_number}.pdf`;
+      const caption = [
+        `📋 Orçamento pronto para envio ao cliente!`,
+        `Cliente: ${quote.cliente_nome}`,
+        version.orcamento_numero ? `Nº: ${version.orcamento_numero}` : null,
+        quote.descricao_pedido ? `Pedido: ${quote.descricao_pedido.slice(0, 120)}` : null,
+      ].filter(Boolean).join('\n');
+
+      const resp = await fetch(
+        `${evolutionUrl}/message/sendMedia/${evolutionInstance}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: evolutionKey },
+          body: JSON.stringify({
+            number: vendedorNumero,
+            mediatype: 'document',
+            mimetype: 'application/pdf',
+            media: pdfUrl,
+            fileName,
+            caption,
+          }),
+        }
+      );
+
+      if (!resp.ok) {
+        const errorText = await resp.text();
+        setToast(`Erro ao enviar para vendedor: ${errorText.slice(0, 120)}`);
+        setSendingPdfVendedor(null);
+        return;
+      }
+
+      setToast('PDF enviado para o vendedor via WhatsApp!');
+      logActivity({
+        quote_id: quote.id,
+        action: 'ENVIADO_VENDEDOR',
+        message: `Versão ${version.version_number} enviada ao vendedor via WhatsApp`,
+        entity_type: 'QUOTE_VERSION',
+        entity_id: String(version.id),
+        author: activityAuthor,
+      });
+      setActivitiesKey((k) => k + 1);
+    } catch (err: any) {
+      setToast(`Erro inesperado: ${err?.message ?? 'tente novamente'}`);
+    }
+
+    setSendingPdfVendedor(null);
+  }
+
   const whatsappHref = quote?.cliente_whatsapp
     ? `https://wa.me/${quote.cliente_whatsapp.replace(/\D/g, '')}`
     : quote?.cliente_telefone
@@ -889,6 +957,11 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
                     {quote.codigo_orcamento ?? `#${quote.id}`}
                   </h2>
                   <StatusBadge status={quote.status} />
+                  {quote.origem === 'AGENTE' && (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-100 text-violet-700 border border-violet-200 leading-none flex-shrink-0">
+                      AGENTE
+                    </span>
+                  )}
                 </div>
                 <button
                   onClick={handleClose}
@@ -1216,36 +1289,42 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
                         return (
                           <div
                             key={v.id}
-                            className={`glass-card-static rounded-glass-sm px-4 py-3 flex items-center gap-3 ${
+                            className={`glass-card-static rounded-glass-sm px-4 py-3 ${
                               isLatest ? 'border border-primary-200 bg-primary-50/30' : ''
                             }`}
                           >
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                              isLatest ? 'bg-primary-100' : 'bg-gray-100'
-                            }`}>
-                              <FileText className={`w-4 h-4 ${isLatest ? 'text-primary-500' : 'text-gray-400'}`} />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className={`text-sm font-semibold ${isLatest ? 'text-primary-600' : 'text-gray-700'}`}>
-                                  v{v.version_number}
-                                </span>
-                                {isLatest && (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-primary-100 text-primary-600 leading-none">
-                                    Mais recente
-                                  </span>
-                                )}
-                                {v.orcamento_numero && (
-                                  <span className="text-xs text-gray-500 truncate">{v.orcamento_numero}</span>
-                                )}
+                            <div className="flex items-center gap-3">
+                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                                isLatest ? 'bg-primary-100' : 'bg-gray-100'
+                              }`}>
+                                <FileText className={`w-4 h-4 ${isLatest ? 'text-primary-500' : 'text-gray-400'}`} />
                               </div>
-                              <p className="text-[11px] text-gray-400 mt-0.5">
-                                {new Date(v.created_at).toLocaleDateString('pt-BR', {
-                                  day: '2-digit', month: '2-digit', year: 'numeric',
-                                  hour: '2-digit', minute: '2-digit',
-                                })}
-                              </p>
-                            </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={`text-sm font-semibold ${isLatest ? 'text-primary-600' : 'text-gray-700'}`}>
+                                    v{v.version_number}
+                                  </span>
+                                  {isLatest && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-primary-100 text-primary-600 leading-none">
+                                      Mais recente
+                                    </span>
+                                  )}
+                                  {!v.pdf_url && v.orcamento_numero && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-500 leading-none">
+                                      Manual
+                                    </span>
+                                  )}
+                                  {v.pdf_url && v.orcamento_numero && (
+                                    <span className="text-xs text-gray-500 truncate">{v.orcamento_numero}</span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-gray-400 mt-0.5">
+                                  {new Date(v.created_at).toLocaleDateString('pt-BR', {
+                                    day: '2-digit', month: '2-digit', year: 'numeric',
+                                    hour: '2-digit', minute: '2-digit',
+                                  })}
+                                </p>
+                              </div>
                             <div className="flex items-center gap-1 flex-shrink-0">
                               {v.pdf_url && (
                                 <>
@@ -1287,6 +1366,24 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
                                       <Send className="w-4 h-4" />
                                     )}
                                   </button>
+                                  {quote?.origem === 'AGENTE' && (
+                                    <button
+                                      onClick={() => handleSendPdfToVendedor(v)}
+                                      disabled={!!sendingPdfVendedor}
+                                      title="Enviar PDF ao Vendedor via WhatsApp"
+                                      className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                                        sendingPdfVendedor === v.id
+                                          ? 'text-green-400 bg-green-50 cursor-wait'
+                                          : 'text-green-500 hover:text-green-700 hover:bg-green-50'
+                                      }`}
+                                    >
+                                      {sendingPdfVendedor === v.id ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                      ) : (
+                                        <MessageSquare className="w-4 h-4" />
+                                      )}
+                                    </button>
+                                  )}
                                 </>
                               )}
                               <button
@@ -1297,6 +1394,14 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
                                 <Trash2 className="w-4 h-4" />
                               </button>
                             </div>
+                            </div>
+                            {!v.pdf_url && v.orcamento_numero && (
+                              <div className="mt-3 pt-3 border-t border-gray-100/80">
+                                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                                  {v.orcamento_numero}
+                                </p>
+                              </div>
+                            )}
                           </div>
                         );
                       });

@@ -33,6 +33,7 @@ interface Quote {
   observacoes?: string | null;
   prioridade: string;
   vendedor_nome: string | null;
+  origem: string;
   order?: QuoteOrder | null;
 }
 
@@ -127,6 +128,7 @@ export default function QuotesPage({ setor }: QuotesPageProps) {
         observacoes,
         prioridade,
         vendedor_nome,
+        origem,
         order:orders(id, setor, codigo_os, status_os)
       `)
       .eq('setor', setor);
@@ -485,7 +487,14 @@ export default function QuotesPage({ setor }: QuotesPageProps) {
                         </span>
                       </td>
                       <td className="px-6 py-4">
-                        <span className="text-sm text-gray-800 font-medium">{q.cliente_nome}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-800 font-medium">{q.cliente_nome}</span>
+                          {q.origem === 'AGENTE' && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-100 text-violet-700 border border-violet-200 leading-none flex-shrink-0">
+                              AGENTE
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="col-iframe-hide px-6 py-4 hidden lg:table-cell">
                         <span className="text-sm text-gray-600">{q.vendedor_nome ?? '—'}</span>
