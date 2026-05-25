@@ -38,7 +38,7 @@ interface Quote {
 
 type TabType = 'orcamentos' | 'aprovados';
 
-export type SetorType = 'GRAFICA_EXPRESSA' | 'GRAFICA_INDUSTRIAL';
+export type SetorType = 'GRAFICA_EXPRESSA' | 'GRAFICA_INDUSTRIAL' | 'COMUNICA_VISUAL';
 
 interface QuotesPageProps {
   setor: SetorType;
@@ -47,6 +47,7 @@ interface QuotesPageProps {
 const SETOR_LABELS: Record<SetorType, string> = {
   GRAFICA_EXPRESSA: 'Gráfica Expressa',
   GRAFICA_INDUSTRIAL: 'Gráfica Industrial',
+  COMUNICA_VISUAL: 'Comunicação Visual',
 };
 
 function formatDate(iso: string) {

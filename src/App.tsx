@@ -24,6 +24,7 @@ function App() {
               <Route path="/orcamentos" element={<Navigate to="/orcamentos-expressa" replace />} />
               <Route path="/orcamentos-expressa" element={<QuotesPage setor="GRAFICA_EXPRESSA" />} />
               <Route path="/orcamentos-industrial" element={<QuotesPage setor="GRAFICA_INDUSTRIAL" />} />
+              <Route path="/orcamentos-comunica-visual" element={<QuotesPage setor="COMUNICA_VISUAL" />} />
               <Route path="/impressao-expressa" element={<ImpressaoExpressaPage />} />
               <Route path="/aprovacao" element={<ApprovalPage />} />
               <Route path="/pre-impressao" element={<PrePressPage />} />
