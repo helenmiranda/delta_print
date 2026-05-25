@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Printer, Loader2, FileText } from 'lucide-react';
+import { Printer, Loader2, FileText, Download, Check } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import StatusBadge from './StatusBadge';
 import PrintProofDrawer from './PrintProofDrawer';
@@ -58,6 +58,18 @@ export default function PrintProofsTable({ filterPeriodo, refreshTrigger }: Prin
   const [proofs, setProofs] = useState<PrintProofRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProofId, setSelectedProofId] = useState<string | null>(null);
+  const [markingDoneId, setMarkingDoneId] = useState<string | null>(null);
+
+  async function handleMarkDone(e: React.MouseEvent, proofId: string) {
+    e.stopPropagation();
+    setMarkingDoneId(proofId);
+    await supabase
+      .from('print_proofs')
+      .update({ status_prova: 'FEITO', updated_at: new Date().toISOString() })
+      .eq('id', proofId);
+    setMarkingDoneId(null);
+    loadProofs();
+  }
 
   function getDateFilter(periodo: string): string | null {
     if (periodo === 'todos') return null;
@@ -173,6 +185,9 @@ export default function PrintProofsTable({ filterPeriodo, refreshTrigger }: Prin
                   <th className="col-iframe-hide text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-4">
                     Data
                   </th>
+                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-4">
+                    Ações
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -221,6 +236,32 @@ export default function PrintProofsTable({ filterPeriodo, refreshTrigger }: Prin
                     </td>
                     <td className="col-iframe-hide px-6 py-4">
                       <span className="text-sm text-gray-500">{formatDateTime(proof.created_at)}</span>
+                    </td>
+                    <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1">
+                        <a
+                          href={proof.arquivo_prova_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Baixar arquivo"
+                          className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+                        >
+                          <Download className="w-4 h-4" />
+                        </a>
+                        {proof.status_prova === 'SOLICITADA' && (
+                          <button
+                            onClick={(e) => handleMarkDone(e, proof.id)}
+                            disabled={markingDoneId === proof.id}
+                            title="Marcar como feito"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors disabled:opacity-50"
+                          >
+                            {markingDoneId === proof.id
+                              ? <Loader2 className="w-4 h-4 animate-spin" />
+                              : <Check className="w-4 h-4" />
+                            }
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
