@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { X, FileText, Loader2, Download, Package, User, Calendar, Printer, Check } from 'lucide-react';
+import { X, FileText, Loader2, Download, Package, User, Calendar, Printer, Check, MessageSquare, Save } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import StatusBadge from './StatusBadge';
 import Toast from './Toast';
@@ -24,6 +24,7 @@ interface PrintProofDetail {
   arquivo_prova_url: string;
   arquivo_prova_nome_original: string | null;
   observacoes: string | null;
+  comentarios: string | null;
   status_prova: string;
   created_at: string;
   updated_at: string;
@@ -71,6 +72,8 @@ export default function PrintProofDrawer({ proofId, onClose, onUpdated }: PrintP
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [savingComentarios, setSavingComentarios] = useState(false);
+  const [comentarios, setComentarios] = useState('');
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -91,6 +94,7 @@ export default function PrintProofDrawer({ proofId, onClose, onUpdated }: PrintP
           arquivo_prova_url,
           arquivo_prova_nome_original,
           observacoes,
+          comentarios,
           status_prova,
           created_at,
           updated_at,
@@ -114,7 +118,9 @@ export default function PrintProofDrawer({ proofId, onClose, onUpdated }: PrintP
         .maybeSingle();
 
       if (!error && data) {
-        setProof(data as PrintProofDetail);
+        const detail = data as PrintProofDetail;
+        setProof(detail);
+        setComentarios(detail.comentarios || '');
       }
       setLoading(false);
     }
@@ -146,6 +152,20 @@ export default function PrintProofDrawer({ proofId, onClose, onUpdated }: PrintP
     }
 
     setUpdating(false);
+  }
+
+  async function handleSaveComentarios() {
+    if (!proof) return;
+    setSavingComentarios(true);
+    const { error } = await supabase
+      .from('print_proofs')
+      .update({ comentarios: comentarios || null, updated_at: new Date().toISOString() })
+      .eq('id', proof.id);
+    if (!error) {
+      setProof({ ...proof, comentarios: comentarios || null });
+      setToast('Comentário salvo');
+    }
+    setSavingComentarios(false);
   }
 
   return (
@@ -279,6 +299,39 @@ export default function PrintProofDrawer({ proofId, onClose, onUpdated }: PrintP
                     </button>
                   </section>
                 )}
+
+                <section>
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    Comentarios internos
+                  </h3>
+                  <div className="space-y-2">
+                    <textarea
+                      value={comentarios}
+                      onChange={(e) => setComentarios(e.target.value)}
+                      rows={4}
+                      className="input-field resize-none text-sm"
+                      placeholder="Adicione observacoes internas sobre esta prova..."
+                    />
+                    <button
+                      onClick={handleSaveComentarios}
+                      disabled={savingComentarios || comentarios === (proof.comentarios || '')}
+                      className="btn-primary w-full text-sm"
+                    >
+                      {savingComentarios ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Salvando...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-4 h-4" />
+                          Salvar comentario
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </section>
 
                 <div className="text-xs text-gray-400 pt-2 pb-4">
                   Solicitado em {formatDateTime(proof.created_at)}
