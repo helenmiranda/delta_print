@@ -4,8 +4,10 @@ import PrintProofsTable from '../components/PrintProofsTable';
 import ProofRequestModal from '../components/ProofRequestModal';
 import LastUpdated from '../components/LastUpdated';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import { useChatwootUser } from '../contexts/ChatwootUserContext';
 
 export default function PrintProofsPage() {
+  const chatwootUser = useChatwootUser();
   const [showNewProofModal, setShowNewProofModal] = useState(false);
   const [filterPeriodo, setFilterPeriodo] = useState<string>('30dias');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -72,6 +74,7 @@ export default function PrintProofsPage() {
         <ProofRequestModal
           onClose={() => setShowNewProofModal(false)}
           onSuccess={handleProofCreated}
+          solicitanteNome={chatwootUser?.name || ''}
         />
       )}
     </div>

@@ -21,9 +21,10 @@ interface ProofRequestModalProps {
   orderId?: number;
   onClose: () => void;
   onSuccess: () => void;
+  solicitanteNome?: string;
 }
 
-export default function ProofRequestModal({ orderId, onClose, onSuccess }: ProofRequestModalProps) {
+export default function ProofRequestModal({ orderId, onClose, onSuccess, solicitanteNome }: ProofRequestModalProps) {
   const [open, setOpen] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
@@ -168,6 +169,7 @@ export default function ProofRequestModal({ orderId, onClose, onSuccess }: Proof
       arquivo_prova_nome_original: uploadedFiles[0].nome,
       observacoes: form.observacoes || null,
       status_prova: 'SOLICITADA',
+      solicitante_nome: solicitanteNome || null,
     };
 
     if (['COUCHE', 'SULFITE', 'C2S'].includes(form.papel_tipo)) {

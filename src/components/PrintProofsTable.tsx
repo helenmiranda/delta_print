@@ -11,6 +11,7 @@ interface PrintProofRow {
   status_prova: string;
   arquivo_prova_url: string;
   arquivo_prova_nome_original: string | null;
+  solicitante_nome: string | null;
   created_at: string;
   order: {
     id: number;
@@ -111,6 +112,7 @@ export default function PrintProofsTable({ filterPeriodo, refreshTrigger }: Prin
         status_prova,
         arquivo_prova_url,
         arquivo_prova_nome_original,
+        solicitante_nome,
         created_at,
         order:orders (
           id,
@@ -177,6 +179,9 @@ export default function PrintProofsTable({ filterPeriodo, refreshTrigger }: Prin
                     Cliente
                   </th>
                   <th className="col-iframe-hide text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-4">
+                    Solicitante
+                  </th>
+                  <th className="col-iframe-hide text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-4">
                     Tipo
                   </th>
                   <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-4">
@@ -226,6 +231,11 @@ export default function PrintProofsTable({ filterPeriodo, refreshTrigger }: Prin
                     <td className="px-6 py-4">
                       <span className="text-sm text-gray-700">
                         {proof.order?.quote?.cliente_nome || '—'}
+                      </span>
+                    </td>
+                    <td className="col-iframe-hide px-6 py-4">
+                      <span className="text-sm text-gray-700">
+                        {proof.solicitante_nome || '—'}
                       </span>
                     </td>
                     <td className="col-iframe-hide px-6 py-4">
