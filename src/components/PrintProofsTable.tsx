@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Printer, Loader2, FileText, Download, Check } from 'lucide-react';
+import { Printer, Loader2, Download, Check, FileText } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import StatusBadge from './StatusBadge';
 import PrintProofDrawer from './PrintProofDrawer';
@@ -162,122 +162,131 @@ export default function PrintProofsTable({ filterPeriodo, refreshTrigger }: Prin
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-4">
-                    Nome da prova
-                  </th>
-                  <th className="col-iframe-hide text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-4">
-                    Arquivo
-                  </th>
-                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-4">
-                    OS
-                  </th>
-                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-4">
-                    Cliente
-                  </th>
-                  <th className="col-iframe-hide text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-4">
-                    Solicitante
-                  </th>
-                  <th className="col-iframe-hide text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-4">
-                    Tipo
-                  </th>
-                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-4">
-                    Status
-                  </th>
-                  <th className="col-iframe-hide text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-4">
-                    Data
-                  </th>
-                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-4">
-                    Ações
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {proofs.map((proof) => (
-                  <tr
-                    key={proof.id}
-                    onClick={() => setSelectedProofId(proof.id)}
-                    className={getStatusRowClasses(proof.status_prova, selectedProofId === proof.id)}
-                  >
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <Printer className="w-4 h-4 text-primary-500 flex-shrink-0" />
-                        <span className="text-sm font-medium text-gray-900">{proof.nome_prova}</span>
-                      </div>
-                    </td>
-                    <td className="col-iframe-hide px-6 py-4">
+          <table className="w-full table-fixed">
+            <colgroup>
+              <col className="w-[18%]" />
+              <col className="w-[16%]" />
+              <col className="w-[8%]" />
+              <col className="w-[13%]" />
+              <col className="col-iframe-hide w-[12%]" />
+              <col className="col-iframe-hide w-[7%]" />
+              <col className="w-[10%]" />
+              <col className="col-iframe-hide w-[10%]" />
+              <col className="w-[6%]" />
+            </colgroup>
+            <thead>
+              <tr className="border-b border-gray-100">
+                <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3">
+                  Nome da prova
+                </th>
+                <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 py-3">
+                  Arquivo
+                </th>
+                <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 py-3">
+                  OS
+                </th>
+                <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 py-3">
+                  Cliente
+                </th>
+                <th className="col-iframe-hide text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 py-3">
+                  Solicitante
+                </th>
+                <th className="col-iframe-hide text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 py-3">
+                  Tipo
+                </th>
+                <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 py-3">
+                  Status
+                </th>
+                <th className="col-iframe-hide text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 py-3">
+                  Data
+                </th>
+                <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 py-3">
+                  Ações
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {proofs.map((proof) => (
+                <tr
+                  key={proof.id}
+                  onClick={() => setSelectedProofId(proof.id)}
+                  className={getStatusRowClasses(proof.status_prova, selectedProofId === proof.id)}
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Printer className="w-4 h-4 text-primary-500 flex-shrink-0" />
+                      <span className="text-sm font-medium text-gray-900 truncate">{proof.nome_prova}</span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-3">
+                    <a
+                      href={proof.arquivo_prova_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      title={proof.arquivo_prova_nome_original || 'Baixar arquivo'}
+                      className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 min-w-0"
+                    >
+                      <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="truncate">
+                        {proof.arquivo_prova_nome_original || proof.arquivo_prova_url.split('/').pop()}
+                      </span>
+                    </a>
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className="text-sm text-primary-600 font-medium truncate block">
+                      {proof.order?.codigo_os || '—'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className="text-sm text-gray-700 truncate block">
+                      {proof.order?.quote?.cliente_nome || '—'}
+                    </span>
+                  </td>
+                  <td className="col-iframe-hide px-3 py-3">
+                    <span className="text-sm text-gray-700 truncate block">
+                      {proof.solicitante_nome || '—'}
+                    </span>
+                  </td>
+                  <td className="col-iframe-hide px-3 py-3">
+                    <span className="text-sm text-gray-700 truncate block">{proof.tipo_impressao}</span>
+                  </td>
+                  <td className="px-3 py-3">
+                    <StatusBadge status={proof.status_prova} />
+                  </td>
+                  <td className="col-iframe-hide px-3 py-3">
+                    <span className="text-sm text-gray-500">{formatDateTime(proof.created_at)}</span>
+                  </td>
+                  <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-1">
                       <a
                         href={proof.arquivo_prova_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 hover:underline max-w-xs truncate"
-                        title={proof.arquivo_prova_nome_original || 'Baixar arquivo'}
+                        title="Baixar arquivo"
+                        className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"
                       >
-                        <FileText className="w-4 h-4 flex-shrink-0" />
-                        <span className="truncate">
-                          {proof.arquivo_prova_nome_original || proof.arquivo_prova_url.split('/').pop()}
-                        </span>
+                        <Download className="w-4 h-4" />
                       </a>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-sm text-primary-600 font-medium">
-                        {proof.order?.codigo_os || '—'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-sm text-gray-700">
-                        {proof.order?.quote?.cliente_nome || '—'}
-                      </span>
-                    </td>
-                    <td className="col-iframe-hide px-6 py-4">
-                      <span className="text-sm text-gray-700">
-                        {proof.solicitante_nome || '—'}
-                      </span>
-                    </td>
-                    <td className="col-iframe-hide px-6 py-4">
-                      <span className="text-sm text-gray-700">{proof.tipo_impressao}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <StatusBadge status={proof.status_prova} />
-                    </td>
-                    <td className="col-iframe-hide px-6 py-4">
-                      <span className="text-sm text-gray-500">{formatDateTime(proof.created_at)}</span>
-                    </td>
-                    <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center gap-1">
-                        <a
-                          href={proof.arquivo_prova_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Baixar arquivo"
-                          className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+                      {proof.status_prova === 'SOLICITADA' && (
+                        <button
+                          onClick={(e) => handleMarkDone(e, proof.id)}
+                          disabled={markingDoneId === proof.id}
+                          title="Marcar como feito"
+                          className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors disabled:opacity-50"
                         >
-                          <Download className="w-4 h-4" />
-                        </a>
-                        {proof.status_prova === 'SOLICITADA' && (
-                          <button
-                            onClick={(e) => handleMarkDone(e, proof.id)}
-                            disabled={markingDoneId === proof.id}
-                            title="Marcar como feito"
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors disabled:opacity-50"
-                          >
-                            {markingDoneId === proof.id
-                              ? <Loader2 className="w-4 h-4 animate-spin" />
-                              : <Check className="w-4 h-4" />
-                            }
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                          {markingDoneId === proof.id
+                            ? <Loader2 className="w-4 h-4 animate-spin" />
+                            : <Check className="w-4 h-4" />
+                          }
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
 
