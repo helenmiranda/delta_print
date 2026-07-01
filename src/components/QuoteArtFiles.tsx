@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Download, Eye, Image, FileText, Trash2, Plus, Loader2 } from 'lucide-react';
+import { Download, Eye, Image, FileText, Trash2, Plus, Loader2, Link2, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { uploadFileToR2, R2UploadError } from '../lib/r2Upload';
 
@@ -43,6 +43,11 @@ export default function QuoteArtFiles({ quoteId, onToast, onViewFile }: QuoteArt
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showLinkForm, setShowLinkForm] = useState(false);
+  const [linkTitle, setLinkTitle] = useState('');
+  const [linkUrl, setLinkUrl] = useState('');
+  const [savingLink, setSavingLink] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function fetchFiles() {
@@ -109,6 +114,34 @@ export default function QuoteArtFiles({ quoteId, onToast, onViewFile }: QuoteArt
     fetchFiles();
   }
 
+  async function handleAddLink() {
+    const url = linkUrl.trim();
+    if (!url) {
+      onToast('Informe a URL do link');
+      return;
+    }
+
+    setSavingLink(true);
+    try {
+      const { error } = await supabase.from('quote_files').insert({
+        quote_id: quoteId,
+        tipo: 'ARTE',
+        arquivo_url: url,
+        arquivo_nome: linkTitle.trim() || url,
+      });
+      if (error) throw error;
+      onToast('Link adicionado');
+      setLinkTitle('');
+      setLinkUrl('');
+      setShowLinkForm(false);
+      fetchFiles();
+    } catch (err) {
+      console.error('Erro ao adicionar link:', err);
+      onToast('Falha ao adicionar link');
+    }
+    setSavingLink(false);
+  }
+
   async function handleDelete(file: QuoteFile) {
     setDeletingId(file.id);
     try {
@@ -133,18 +166,45 @@ export default function QuoteArtFiles({ quoteId, onToast, onViewFile }: QuoteArt
           <Image className="w-3.5 h-3.5" />
           Artes do cliente
         </h3>
-        <button
-          onClick={() => inputRef.current?.click()}
-          disabled={uploading}
-          className="flex items-center gap-1.5 text-xs font-medium text-primary-600 hover:text-primary-700 disabled:opacity-50 transition-colors"
-        >
-          {uploading ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Plus className="w-3.5 h-3.5" />
+        <div className="relative">
+          <button
+            onClick={() => setMenuOpen(prev => !prev)}
+            disabled={uploading}
+            className="flex items-center gap-1.5 text-xs font-medium text-primary-600 hover:text-primary-700 disabled:opacity-50 transition-colors"
+          >
+            {uploading ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Plus className="w-3.5 h-3.5" />
+            )}
+            {uploading ? 'Enviando...' : 'Adicionar arte'}
+          </button>
+
+          {menuOpen && (
+            <div className="absolute right-0 top-full mt-1 z-10 w-40 glass-card-static rounded-glass-sm shadow-lg overflow-hidden">
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  inputRef.current?.click();
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Enviar arquivo
+              </button>
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  setShowLinkForm(true);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <Link2 className="w-3.5 h-3.5" />
+                Adicionar link
+              </button>
+            </div>
           )}
-          {uploading ? 'Enviando...' : 'Adicionar arte'}
-        </button>
+        </div>
         <input
           ref={inputRef}
           type="file"
@@ -154,6 +214,45 @@ export default function QuoteArtFiles({ quoteId, onToast, onViewFile }: QuoteArt
           onChange={handleFileChange}
         />
       </div>
+
+      {showLinkForm && (
+        <div className="glass-card-static rounded-glass-sm p-3 mb-2 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium text-gray-600">Adicionar link de arte</p>
+            <button
+              onClick={() => {
+                setShowLinkForm(false);
+                setLinkTitle('');
+                setLinkUrl('');
+              }}
+              className="text-gray-400 hover:text-gray-600"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <input
+            type="text"
+            placeholder="Título (opcional)"
+            value={linkTitle}
+            onChange={e => setLinkTitle(e.target.value)}
+            className="input-field w-full"
+          />
+          <input
+            type="url"
+            placeholder="https://..."
+            value={linkUrl}
+            onChange={e => setLinkUrl(e.target.value)}
+            className="input-field w-full"
+          />
+          <button
+            onClick={handleAddLink}
+            disabled={savingLink || !linkUrl.trim()}
+            className="btn-primary w-full text-xs py-1.5 disabled:opacity-50"
+          >
+            {savingLink ? 'Adicionando...' : 'Adicionar'}
+          </button>
+        </div>
+      )}
 
       <div className="glass-card-static rounded-glass-sm overflow-hidden">
         {loading ? (

@@ -1,0 +1,1318 @@
+<script>
+(function () {
+  /* ============================================================
+   *  CONFIGURAÇÃO
+   * ============================================================ */
+  const CFG = {
+    SECTION_TITLE: 'Orçamentos do Cliente',
+    SECTION_ICON:  '📋',
+    START_OPEN:    true,
+    ALLOWED_ACCOUNT_IDS: [2],
+    SUPABASE_URL: 'https://pyiyhaohmldxovawzyxa.supabase.co',
+    SUPABASE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5aXloYW9obWxkeG92YXd6eXhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzNTQ2MDksImV4cCI6MjA4NTkzMDYwOX0.-f8ihlbpV_rrNZQBASwxsbvs9rGsMpYkOWPLLKQZU_k',
+  };
+
+  /* ── Helpers ── */
+  const $ = (s, r = document) => { try { return r.querySelector(s); } catch { return null; } };
+  const $$ = (s, r = document) => { try { return Array.from(r.querySelectorAll(s)); } catch { return []; } };
+  const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
+  const norm = s => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+  /* ── Filtro de conta ── */
+  const currentAccountId = window.location.pathname.match(/accounts\/(\d+)/)?.[1];
+  if (!CFG.ALLOWED_ACCOUNT_IDS.includes(Number(currentAccountId))) return;
+
+  /* ── API Supabase ── */
+  const sbHeaders = {
+    'apikey': CFG.SUPABASE_KEY,
+    'Authorization': `Bearer ${CFG.SUPABASE_KEY}`,
+    'Content-Type': 'application/json',
+  };
+
+  async function sbGet(table, params) {
+    const url = `${CFG.SUPABASE_URL}/rest/v1/${table}?${params}`;
+    const res = await fetch(url, { headers: sbHeaders });
+    const body = await res.json();
+    if (!res.ok) throw new Error(`Supabase GET ${table} ${res.status}: ${JSON.stringify(body)}`);
+    return body;
+  }
+
+  async function sbDelete(table, params) {
+    const url = `${CFG.SUPABASE_URL}/rest/v1/${table}?${params}`;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { ...sbHeaders, 'Prefer': 'return=minimal' },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(`Supabase DELETE ${table} ${res.status}: ${err.message || JSON.stringify(err)}`);
+    }
+  }
+
+  async function sbPatch(table, params, body) {
+    const url = `${CFG.SUPABASE_URL}/rest/v1/${table}?${params}`;
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers: { ...sbHeaders, 'Prefer': 'return=minimal' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`Supabase PATCH ${table} ${res.status}`);
+  }
+
+  async function sbPost(table, body) {
+    const url = `${CFG.SUPABASE_URL}/rest/v1/${table}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { ...sbHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(`Supabase POST ${table} ${res.status}: ${err.message || err.details || JSON.stringify(err)}`);
+    }
+    return res.json();
+  }
+
+  /* ── Upload de arquivo via Supabase Storage ── */
+  async function uploadFile(file, bucket, path) {
+    const safePath = path.split('/').map(seg => encodeURIComponent(seg)).join('/');
+    // Tenta POST primeiro, depois PUT (upsert)
+    for (const method of ['POST', 'PUT']) {
+      const url = `${CFG.SUPABASE_URL}/storage/v1/object/${bucket}/${safePath}`;
+      const res = await fetch(url, {
+        method,
+        headers: {
+          'apikey': CFG.SUPABASE_KEY,
+          'Authorization': `Bearer ${CFG.SUPABASE_KEY}`,
+          'Content-Type': file.type || 'application/octet-stream',
+          'x-upsert': 'true',
+        },
+        body: file,
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        return data.Key
+          ? `${CFG.SUPABASE_URL}/storage/v1/object/public/${data.Key}`
+          : `${CFG.SUPABASE_URL}/storage/v1/object/public/${bucket}/${safePath}`;
+      }
+      const errBody = await res.text().catch(() => '');
+      console.warn(`[CW-HIST] Upload ${method} ${res.status}:`, errBody);
+    }
+    throw new Error('Upload falhou. Verifique se o bucket "' + bucket + '" existe no Supabase Storage e tem política de INSERT habilitada.');
+  }
+
+  /* ── Dados do contato via Vuex / API ── */
+  async function getContactData() {
+    try {
+      const app   = document.querySelector('#app')?.__vue_app__;
+      const store = app?.config?.globalProperties?.$store;
+      if (!store) return {};
+      const convId = Number(window.location.pathname.match(/conversations\/(\d+)/)?.[1]);
+      const conv   = store.state?.conversations?.records?.[convId];
+      const sender = conv?.meta?.sender;
+      if (sender?.phone_number || sender?.name) {
+        return { whatsapp: sender.phone_number || '', nome: sender.name || '' };
+      }
+      const token = store.state?.auth?.currentUser?.access_token;
+      if (!token) return {};
+      const apiRes = await fetch(
+        `/api/v1/accounts/${currentAccountId}/conversations/${convId}`,
+        { headers: { 'api_access_token': token } }
+      );
+      if (!apiRes.ok) return {};
+      const data = await apiRes.json();
+      const s = data?.meta?.sender;
+      return { whatsapp: s?.phone_number || '', nome: s?.name || '' };
+    } catch (_) { return {}; }
+  }
+
+  /* ── Busca orçamentos ── */
+  async function fetchQuotes(contact) {
+    const { whatsapp, nome } = contact;
+    const phoneNorm = (whatsapp || '').replace(/\D/g, '');
+    const results = new Map();
+
+    async function query(field, value) {
+      if (!value || value.length < 3) return;
+      const rows = await sbGet('quotes', [
+        `${field}=ilike.*${encodeURIComponent(value)}*`,
+        `select=id,codigo_orcamento,status,descricao_pedido,created_at,setor,cliente_nome,cliente_telefone,cliente_whatsapp,cliente_cpf_cnpj,endereco_entrega,approved_quote_version_id`,
+        `deleted_at=is.null`,
+        `order=created_at.desc`,
+        `limit=20`,
+      ].join('&'));
+      rows.forEach(r => results.set(r.id, r));
+    }
+
+    const promises = [];
+    if (phoneNorm.length >= 9) promises.push(query('cliente_whatsapp', phoneNorm.slice(-9)));
+    if (nome) promises.push(query('cliente_nome', nome));
+    await Promise.all(promises);
+    return [...results.values()];
+  }
+
+  /* ── Busca versões de um orçamento ── */
+  async function fetchVersions(quoteId) {
+    return sbGet('quote_versions', [
+      `quote_id=eq.${quoteId}`,
+      `select=id,version_number,pdf_url,orcamento_numero,prazo_pagamento,forma_pagamento,status,created_at`,
+      `order=version_number.desc`,
+    ].join('&'));
+  }
+
+  /* ── Busca itens de uma versão ── */
+  async function fetchItems(versionId) {
+    return sbGet('quote_version_items', [
+      `quote_version_id=eq.${versionId}`,
+      `select=id,orc_item_codigo,descricao,quantidade,preco_unitario,valor_total`,
+      `order=id.asc`,
+    ].join('&'));
+  }
+
+  /* ── Badges ── */
+  const STATUS_MAP = {
+    'PENDENTE_ORCAMENTO': { label: 'Pendente',          color: '#f59e0b', bg: '#fef3c7' },
+    'ORCAMENTO_ENVIADO':  { label: 'Enviado',           color: '#3b82f6', bg: '#eff6ff' },
+    'APROVADO_CLIENTE':   { label: 'Aprovado',          color: '#10b981', bg: '#d1fae5' },
+    'NAO_APROVADO':       { label: 'Recusado',          color: '#ef4444', bg: '#fee2e2' },
+    'OS_GERADA':          { label: 'OS Gerada',         color: '#8b5cf6', bg: '#ede9fe' },
+    'PRONTO_PARA_ENVIAR': { label: 'Pronto p/ Enviar',  color: '#0891b2', bg: '#cffafe' },
+  };
+
+  function statusBadge(status) {
+    const s = STATUS_MAP[status] || { label: status || '—', color: '#6b7280', bg: '#f3f4f6' };
+    return `<span style="display:inline-block;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:600;letter-spacing:.02em;color:${s.color};background:${s.bg};">${s.label}</span>`;
+  }
+
+  function setorBadge(setor) {
+    const map = {
+      'GRAFICA_INDUSTRIAL': { label: 'Delta Print', color: '#0369a1', bg: '#e0f2fe' },
+      'GRAFICA_EXPRESSA':   { label: 'Alpha Print', color: '#7c3aed', bg: '#ede9fe' },
+    };
+    const s = map[setor] || { label: setor || '—', color: '#6b7280', bg: '#f3f4f6' };
+    return `<span style="display:inline-block;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:600;color:${s.color};background:${s.bg};">🏭 ${s.label}</span>`;
+  }
+
+  function formatDate(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'2-digit' });
+  }
+
+  function formatCurrency(v) {
+    if (!v && v !== 0) return '—';
+    return Number(v).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+  }
+
+  /* ── Painel de aprovação inline (expande no painel direito) ── */
+  function buildApprovalPanel(quote, container, onSuccess) {
+    // Remove painel anterior se existir
+    const existing = container.querySelector('.cw-approval-panel');
+    if (existing) { existing.remove(); return; } // toggle
+
+    const panel = document.createElement('div');
+    panel.className = 'cw-approval-panel';
+    panel.style.cssText = `
+      border:1px solid #e5e7eb;border-radius:8px;
+      background:#fff;overflow:hidden;
+      margin-top:4px;font-family:inherit;font-size:13px;
+    `;
+
+    panel.innerHTML = `
+      <!-- Header do painel -->
+      <div style="
+        display:flex;align-items:center;justify-content:space-between;
+        padding:10px 13px;
+        background:linear-gradient(135deg,#ecfdf5 0%,#f0fdf4 100%);
+        border-bottom:1px solid #bbf7d0;
+      ">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="
+            width:28px;height:28px;border-radius:8px;
+            background:#10b981;display:flex;align-items:center;justify-content:center;
+            font-size:13px;flex-shrink:0;box-shadow:0 2px 6px rgba(16,185,129,.3);
+          ">✅</div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#065f46;line-height:1.2;">Aprovar Orçamento</div>
+            <div style="font-size:11px;color:#6b7280;margin-top:1px;">${quote.codigo_orcamento || '#'+quote.id} · ${quote.cliente_nome || ''}</div>
+          </div>
+        </div>
+        <button class="cw-ap-close" style="
+          background:rgba(0,0,0,.05);border:none;cursor:pointer;
+          color:#6b7280;font-size:13px;line-height:1;
+          width:24px;height:24px;border-radius:6px;
+          display:flex;align-items:center;justify-content:center;
+        ">✕</button>
+      </div>
+
+      <!-- Indicador de etapas -->
+      <div style="display:flex;gap:0;border-bottom:1px solid #e5e7eb;background:#f9fafb;">
+        <button id="cw-ap-tab1" style="
+          flex:1;padding:8px;font-size:11.5px;font-weight:600;border:none;
+          background:#fff;border-bottom:2px solid #10b981;color:#10b981;
+          cursor:pointer;font-family:inherit;transition:all .15s;">
+          1. Dados do Cliente
+        </button>
+        <button id="cw-ap-tab2" style="
+          flex:1;padding:8px;font-size:11.5px;font-weight:600;border:none;
+          background:#f9fafb;border-bottom:2px solid transparent;color:#9ca3af;
+          cursor:pointer;font-family:inherit;transition:all .15s;">
+          2. Orçamento &amp; Docs
+        </button>
+      </div>
+
+      <!-- ETAPA 1: Dados do Cliente -->
+      <div id="cw-ap-step1">
+        <!-- Dados do Cliente -->
+        <div class="cw-ap-block">
+          <div class="cw-ap-block-title"><span>👤</span> Dados do Cliente</div>
+          <div class="cw-ap-field">
+            <label class="cw-ap-label">Nome ou Razão Social <span style="color:#ef4444;">*</span></label>
+            <input id="cw-ap-cli-nome" class="cw-ap-input" type="text" placeholder="Nome completo ou razão social" />
+          </div>
+          <div class="cw-ap-2col">
+            <div class="cw-ap-field">
+              <label class="cw-ap-label">CPF ou CNPJ <span style="color:#ef4444;">*</span></label>
+              <input id="cw-ap-cli-doc" class="cw-ap-input" type="text" placeholder="000.000.000-00" />
+            </div>
+            <div class="cw-ap-field">
+              <label class="cw-ap-label">CEP</label>
+              <input id="cw-ap-cli-cep" class="cw-ap-input" type="text" placeholder="00000-000" maxlength="9" />
+            </div>
+          </div>
+          <div class="cw-ap-field">
+            <label class="cw-ap-label">Endereço <span style="color:#ef4444;">*</span></label>
+            <input id="cw-ap-cli-end" class="cw-ap-input" type="text" placeholder="Rua, número, bairro, cidade" />
+          </div>
+          <div class="cw-ap-2col">
+            <div class="cw-ap-field">
+              <label class="cw-ap-label">Telefone <span style="color:#ef4444;">*</span></label>
+              <input id="cw-ap-cli-tel" class="cw-ap-input" type="text" placeholder="(48) 99999-9999" />
+            </div>
+            <div class="cw-ap-field">
+              <label class="cw-ap-label">E-mail <span style="color:#ef4444;">*</span></label>
+              <input id="cw-ap-cli-email" class="cw-ap-input" type="email" placeholder="email@cliente.com" />
+            </div>
+          </div>
+        </div>
+        <!-- Botão Próximo -->
+        <div style="padding:10px 11px;display:flex;justify-content:flex-end;">
+          <button id="cw-ap-proximo" style="
+            padding:8px 20px;border:none;border-radius:8px;
+            background:linear-gradient(135deg,#10b981,#059669);
+            color:#fff;font-size:12.5px;font-weight:700;
+            font-family:inherit;cursor:pointer;
+            box-shadow:0 2px 8px rgba(16,185,129,.3);
+            transition:all .15s;
+          ">Próximo →</button>
+        </div>
+      </div>
+
+      <!-- ETAPA 2: Orçamento e Docs -->
+      <div id="cw-ap-step2" style="display:none;">
+        <!-- Versão -->
+        <div class="cw-ap-block">
+          <div class="cw-ap-block-title"><span>📄</span> Versão do Orçamento</div>
+          <div class="cw-ap-field">
+            <select id="cw-ap-version" class="cw-ap-select">
+              <option value="">Carregando versões...</option>
+            </select>
+          </div>
+          <a id="cw-ap-pdf-link" href="#" target="_blank" style="
+            display:none;font-size:11.5px;color:#6366f1;text-decoration:none;">
+            📎 Ver PDF desta versão
+          </a>
+        </div>
+
+        <!-- Itens -->
+        <div class="cw-ap-block" id="cw-ap-items-block" style="display:none;">
+          <div class="cw-ap-block-title"><span>📋</span> Itens da Versão</div>
+          <div id="cw-ap-items-wrap" style="border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;"></div>
+          <div style="display:flex;justify-content:flex-end;font-size:11.5px;color:#6b7280;gap:4px;">
+            Total: <strong id="cw-ap-total" style="color:#111827;">R$ 0,00</strong>
+          </div>
+        </div>
+
+        <!-- Aprovação -->
+        <div class="cw-ap-block" id="cw-ap-info-block" style="display:none;">
+          <div class="cw-ap-block-title"><span>✅</span> Dados da Aprovação</div>
+          <div class="cw-ap-field">
+            <label class="cw-ap-label">Descrição <span style="color:#ef4444;">*</span></label>
+            <textarea id="cw-ap-desc" class="cw-ap-textarea" rows="2"
+              placeholder="O que foi aprovado..."></textarea>
+          </div>
+          <div class="cw-ap-field">
+            <label class="cw-ap-label">Valor total (R$) <span style="color:#ef4444;">*</span></label>
+            <input id="cw-ap-valor" class="cw-ap-input" type="number" step="0.01" placeholder="0,00" />
+          </div>
+        </div>
+
+        <!-- Pagamento -->
+        <div class="cw-ap-block" id="cw-ap-pgto-block" style="display:none;">
+          <div class="cw-ap-block-title"><span>💳</span> Forma de Pagamento</div>
+          <div class="cw-ap-2col">
+            <div class="cw-ap-field">
+              <label class="cw-ap-label">Prazo</label>
+              <input id="cw-ap-prazo" class="cw-ap-input" type="text" placeholder="15/02/2026" />
+            </div>
+            <div class="cw-ap-field">
+              <label class="cw-ap-label">Forma</label>
+              <input id="cw-ap-forma" class="cw-ap-input" type="text" placeholder="SICOOB..." />
+            </div>
+          </div>
+          <div class="cw-ap-field">
+            <label class="cw-ap-label">Regras / Obs</label>
+            <textarea id="cw-ap-regras" class="cw-ap-textarea" rows="2"
+              placeholder="Multa 2% após vencimento..."></textarea>
+          </div>
+        </div>
+
+        <!-- Documentos -->
+        <div class="cw-ap-block" id="cw-ap-docs-block" style="display:none;">
+          <div class="cw-ap-block-title"><span>📎</span> Documentos</div>
+          <div class="cw-ap-field">
+            <label class="cw-ap-label">Comprovante de pagamento <span style="color:#ef4444;">*</span></label>
+            <input id="cw-ap-url-pgto" class="cw-ap-input" type="url" placeholder="Cole a URL..." />
+            <label style="margin-top:3px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;
+                          font-size:11px;color:#6366f1;">
+              <input id="cw-ap-file-pgto" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" />
+              📁 ou selecione um arquivo
+            </label>
+            <span id="cw-ap-pgto-ok" style="display:none;font-size:11px;color:#10b981;">✅ Arquivo pronto</span>
+          </div>
+          <div class="cw-ap-field">
+            <label class="cw-ap-label">Comprovante de aprovação <span style="color:#ef4444;">*</span></label>
+            <input id="cw-ap-url-aprov" class="cw-ap-input" type="url" placeholder="Cole a URL..." />
+            <div style="display:flex;gap:5px;margin-top:3px;flex-wrap:wrap;">
+              <label class="cw-ap-file-label">
+                <input id="cw-ap-file-aprov" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" />
+                📁 Arquivo
+              </label>
+              <button id="cw-ap-screenshot" class="cw-ap-action-btn">📸 Print da tela</button>
+            </div>
+            <span id="cw-ap-aprov-ok" style="display:none;font-size:11px;color:#10b981;">✅ Pronto para envio</span>
+          </div>
+          <div class="cw-ap-field">
+            <label class="cw-ap-label">Contrato social</label>
+            <select id="cw-ap-contrato" class="cw-ap-select">
+              <option value="nao">Não possui</option>
+              <option value="sim">Possui</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feedback -->
+      <div id="cw-ap-feedback" style="display:none;margin:8px 11px;
+           padding:7px 10px;border-radius:6px;font-size:12px;font-weight:500;"></div>
+
+      <!-- Footer -->
+      <div style="
+        padding:10px 13px;border-top:1px solid #f3f4f6;
+        display:flex;gap:7px;justify-content:flex-end;
+        background:#fafafa;
+      ">
+        <button class="cw-ap-close" style="
+          padding:7px 16px;border:1.5px solid #e5e7eb;
+          border-radius:8px;background:#fff;font-size:12.5px;font-weight:500;
+          font-family:inherit;cursor:pointer;color:#6b7280;
+          transition:all .15s;
+        ">Cancelar</button>
+        <button id="cw-ap-confirm" style="
+          display:none;padding:7px 18px;
+          border:none;border-radius:8px;
+          background:linear-gradient(135deg,#10b981,#059669);
+          color:#fff;font-size:12.5px;font-weight:700;
+          font-family:inherit;cursor:pointer;
+          box-shadow:0 2px 8px rgba(16,185,129,.3);
+          transition:all .15s;
+        " disabled>✅ Confirmar aprovação</button>
+      </div>`;
+
+    // Fechar
+    panel.querySelectorAll('.cw-ap-close').forEach(btn => {
+      on(btn, 'click', () => panel.remove());
+    });
+
+    // Lógica das abas
+    const tab1 = panel.querySelector('#cw-ap-tab1');
+    const tab2 = panel.querySelector('#cw-ap-tab2');
+    const step1 = panel.querySelector('#cw-ap-step1');
+    const step2 = panel.querySelector('#cw-ap-step2');
+
+    function goToStep(n) {
+      if (n === 1) {
+        step1.style.display = 'block'; step2.style.display = 'none';
+        tab1.style.background = '#fff'; tab1.style.borderBottomColor = '#10b981'; tab1.style.color = '#10b981';
+        tab2.style.background = '#f9fafb'; tab2.style.borderBottomColor = 'transparent'; tab2.style.color = '#9ca3af';
+        confirmBtn.style.display = 'none';
+      } else {
+        step1.style.display = 'none'; step2.style.display = 'block';
+        tab2.style.background = '#fff'; tab2.style.borderBottomColor = '#10b981'; tab2.style.color = '#10b981';
+        tab1.style.background = '#f9fafb'; tab1.style.borderBottomColor = 'transparent'; tab1.style.color = '#9ca3af';
+      }
+    }
+
+    tab1.addEventListener('click', () => goToStep(1));
+    panel.querySelector('#cw-ap-proximo').addEventListener('click', validarEAvancar);
+    function validarEAvancar() {
+      const nome  = panel.querySelector('#cw-ap-cli-nome').value.trim();
+      const doc   = panel.querySelector('#cw-ap-cli-doc').value.trim();
+      const cep   = panel.querySelector('#cw-ap-cli-cep').value.trim();
+      const end   = panel.querySelector('#cw-ap-cli-end').value.trim();
+      const tel   = panel.querySelector('#cw-ap-cli-tel').value.trim();
+      const email = panel.querySelector('#cw-ap-cli-email').value.trim();
+      const markE = (id) => { panel.querySelector(id).style.borderColor = '#ef4444'; panel.querySelector(id).focus(); };
+      if (!nome)  { showFeedback('Preencha o nome ou razão social.', 'error'); markE('#cw-ap-cli-nome');  return; }
+      if (!doc)   { showFeedback('Preencha o CPF ou CNPJ.', 'error');          markE('#cw-ap-cli-doc');   return; }
+      if (!end)   { showFeedback('Preencha o endereço.', 'error');             markE('#cw-ap-cli-end');   return; }
+      if (!tel)   { showFeedback('Preencha o telefone.', 'error');             markE('#cw-ap-cli-tel');   return; }
+      if (!email) { showFeedback('Preencha o e-mail.', 'error');               markE('#cw-ap-cli-email'); return; }
+      goToStep(2);
+    }
+
+    tab2.addEventListener('click', validarEAvancar);
+
+    container.appendChild(panel);
+
+
+
+    // Pré-preencher dados do cliente se já existirem no quote
+    if (quote.cliente_nome)     panel.querySelector('#cw-ap-cli-nome').value  = quote.cliente_nome;
+    if (quote.cliente_telefone) panel.querySelector('#cw-ap-cli-tel').value   = quote.cliente_telefone;
+    if (quote.cliente_whatsapp && !quote.cliente_telefone)
+                                panel.querySelector('#cw-ap-cli-tel').value   = quote.cliente_whatsapp;
+    if (quote.cliente_cpf_cnpj) panel.querySelector('#cw-ap-cli-doc').value  = quote.cliente_cpf_cnpj;
+    if (quote.endereco_entrega) panel.querySelector('#cw-ap-cli-end').value   = quote.endereco_entrega;
+
+    // Limpar borda de erro ao digitar
+    panel.querySelector('#cw-ap-url-pgto').addEventListener('input', function() {
+      this.style.borderColor = '';
+    });
+    panel.querySelector('#cw-ap-url-aprov').addEventListener('input', function() {
+      this.style.borderColor = '';
+    });
+
+    // Busca endereço pelo CEP automaticamente
+    panel.querySelector('#cw-ap-cli-cep').addEventListener('blur', async function() {
+      const cep = this.value.replace(/\D/g, '');
+      if (cep.length !== 8) return;
+      this.value = cep.replace(/(\d{5})(\d{3})/, '$1-$2');
+      try {
+        const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+        const d = await res.json();
+        if (!d.erro) {
+          const endEl = panel.querySelector('#cw-ap-cli-end');
+          endEl.value = [d.logradouro, d.bairro, d.localidade + '-' + d.uf].filter(Boolean).join(', ');
+        }
+      } catch(e) {}
+    });
+
+    // Máscara CEP
+    panel.querySelector('#cw-ap-cli-cep').addEventListener('input', function() {
+      this.value = this.value.replace(/\D/g,'').replace(/(\d{5})(\d)/,'$1-$2').slice(0,9);
+    });
+
+    const vSelect   = panel.querySelector('#cw-ap-version');
+    const itemsWrap = panel.querySelector('#cw-ap-items-wrap');
+    const totalEl   = panel.querySelector('#cw-ap-total');
+    const confirmBtn = panel.querySelector('#cw-ap-confirm');
+    const feedback  = panel.querySelector('#cw-ap-feedback');
+
+    const subBlocks = ['cw-ap-items-block','cw-ap-info-block','cw-ap-pgto-block','cw-ap-docs-block'];
+    function showBlocks(show) {
+      subBlocks.forEach(id => {
+        const el = panel.querySelector('#'+id);
+        if (el) el.style.display = show ? 'block' : 'none';
+      });
+      confirmBtn.style.display = show ? 'inline-block' : 'none';
+    }
+
+    /* Screenshot */
+    let screenshotBlob = null;
+    on(panel.querySelector('#cw-ap-screenshot'), 'click', async () => {
+      const btn = panel.querySelector('#cw-ap-screenshot');
+      btn.textContent = '⏳ Aguarde...';
+      btn.disabled = true;
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { mediaSource: 'screen' }, preferCurrentTab: true,
+        });
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        await video.play();
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        stream.getTracks().forEach(t => t.stop());
+        canvas.toBlob(blob => {
+          screenshotBlob = blob;
+          const ok = panel.querySelector('#cw-ap-aprov-ok');
+          ok.style.display = 'block';
+          ok.innerHTML = `✅ Print capturado — <a href="${URL.createObjectURL(blob)}" target="_blank" style="color:#6366f1;">prévia</a>`;
+        }, 'image/png');
+      } catch(e) {
+        if (e.name !== 'NotAllowedError') showFeedback('Erro ao capturar: ' + e.message, 'error');
+      }
+      btn.textContent = '📸 Print da tela';
+      btn.disabled = false;
+    });
+
+    on(panel.querySelector('#cw-ap-file-pgto'), 'change', e => {
+      panel.querySelector('#cw-ap-pgto-ok').style.display = e.target.files[0] ? 'block' : 'none';
+    });
+    on(panel.querySelector('#cw-ap-file-aprov'), 'change', e => {
+      if (e.target.files[0]) {
+        screenshotBlob = null;
+        const ok = panel.querySelector('#cw-ap-aprov-ok');
+        ok.style.display = 'block';
+        ok.textContent = '✅ Arquivo selecionado';
+      }
+    });
+
+    /* Carrega versões */
+    let versions = [];
+    fetchVersions(quote.id).then(vs => {
+      versions = vs;
+      vSelect.innerHTML = !vs.length
+        ? '<option value="">Nenhuma versão encontrada</option>'
+        : '<option value="">Selecione uma versão...</option>' +
+          vs.map(v => `<option value="${v.id}">Versão ${v.version_number} — ${formatDate(v.created_at)}${v.orcamento_numero ? ' · Nº '+v.orcamento_numero : ''}</option>`).join('');
+    }).catch(err => {
+      console.error('[CW-HIST] fetchVersions:', err);
+      vSelect.innerHTML = '<option value="">Erro ao carregar</option>';
+    });
+
+    on(vSelect, 'change', async () => {
+      const vId = vSelect.value;
+      if (!vId) { showBlocks(false); return; }
+      const v = versions.find(x => String(x.id) === String(vId));
+
+      const pdfLink = panel.querySelector('#cw-ap-pdf-link');
+      if (v?.pdf_url) { pdfLink.href = v.pdf_url; pdfLink.style.display = 'block'; }
+      else { pdfLink.style.display = 'none'; }
+
+      if (v) {
+        panel.querySelector('#cw-ap-prazo').value  = v.prazo_pagamento || '';
+        panel.querySelector('#cw-ap-forma').value  = v.forma_pagamento || '';
+        panel.querySelector('#cw-ap-regras').value = v.pagamento_regras || '';
+      }
+
+      itemsWrap.innerHTML = `<div style="padding:10px;text-align:center;color:#9ca3af;font-size:11.5px;">Carregando...</div>`;
+      showBlocks(true);
+      confirmBtn.disabled = true;
+
+      try {
+        const items = await fetchItems(vId);
+        renderItems(items);
+      } catch(_) {
+        itemsWrap.innerHTML = `<div style="padding:10px;color:#ef4444;font-size:12px;">Erro ao carregar itens.</div>`;
+      }
+    });
+
+    function renderItems(items) {
+      if (!items.length) {
+        itemsWrap.innerHTML = `<div style="padding:10px;text-align:center;color:#9ca3af;font-size:11.5px;">Nenhum item.</div>`;
+        updateTotal(); return;
+      }
+      const trunc = (s, n=60) => s && s.length > n ? s.slice(0, n) + '…' : (s || '—');
+      itemsWrap.innerHTML = `
+        <table class="cw-ap-table" style="table-layout:fixed;width:100%;">
+          <colgroup>
+            <col style="width:28px;">
+            <col style="width:72px;">
+            <col style="width:auto;">
+            <col style="width:44px;">
+            <col style="width:72px;">
+          </colgroup>
+          <thead><tr>
+            <th></th>
+            <th>Cód</th>
+            <th>Descrição</th>
+            <th style="text-align:right;">Qtd</th>
+            <th style="text-align:right;">Valor</th>
+          </tr></thead>
+          <tbody>${items.map(it => `
+            <tr class="cw-item-row">
+              <td><input type="checkbox" class="cw-item-chk"
+                data-value="${it.valor_total||0}"
+                data-id="${it.id}"
+                checked
+                style="accent-color:#10b981;cursor:pointer;" /></td>
+              <td style="color:#6b7280;font-size:10.5px;word-break:break-all;">${it.orc_item_codigo||'—'}</td>
+              <td title="${(it.descricao||'').replace(/"/g,'&quot;')}"
+                  style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:0;">
+                ${trunc(it.descricao)}
+              </td>
+              <td style="text-align:right;">${it.quantidade||'—'}</td>
+              <td style="text-align:right;font-weight:600;white-space:nowrap;">${formatCurrency(it.valor_total)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+
+      panel.querySelectorAll('.cw-item-row').forEach(row => {
+        on(row, 'click', e => {
+          if (e.target.type === 'checkbox') return;
+          const chk = row.querySelector('.cw-item-chk');
+          chk.checked = !chk.checked; updateTotal();
+        });
+      });
+      panel.querySelectorAll('.cw-item-chk').forEach(chk => on(chk, 'change', updateTotal));
+      updateTotal();
+    }
+
+    function updateTotal() {
+      let total = 0;
+      panel.querySelectorAll('.cw-item-chk:checked').forEach(chk => {
+        total += parseFloat(chk.dataset.value) || 0;
+      });
+      totalEl.textContent = formatCurrency(total);
+      panel.querySelector('#cw-ap-valor').value = total > 0 ? total.toFixed(2) : '';
+      confirmBtn.disabled = total === 0;
+    }
+
+    /* Confirmar */
+    on(confirmBtn, 'click', async () => {
+      const vId      = vSelect.value;
+      const desc     = panel.querySelector('#cw-ap-desc').value.trim();
+      const valor    = parseFloat(panel.querySelector('#cw-ap-valor').value);
+      const prazo    = panel.querySelector('#cw-ap-prazo').value.trim();
+      const forma    = panel.querySelector('#cw-ap-forma').value.trim();
+      const regras   = panel.querySelector('#cw-ap-regras').value.trim();
+      const contrato = panel.querySelector('#cw-ap-contrato').value;
+      const urlPgto  = panel.querySelector('#cw-ap-url-pgto').value.trim();
+      const urlAprov = panel.querySelector('#cw-ap-url-aprov').value.trim();
+      const filePgto  = panel.querySelector('#cw-ap-file-pgto').files[0];
+      const fileAprov = panel.querySelector('#cw-ap-file-aprov').files[0];
+
+      // Dados do cliente
+      const cliNome  = panel.querySelector('#cw-ap-cli-nome').value.trim();
+      const cliDoc   = panel.querySelector('#cw-ap-cli-doc').value.trim();
+      const cliCep   = panel.querySelector('#cw-ap-cli-cep').value.trim();
+      const cliEnd   = panel.querySelector('#cw-ap-cli-end').value.trim();
+      const cliTel   = panel.querySelector('#cw-ap-cli-tel').value.trim();
+      const cliEmail = panel.querySelector('#cw-ap-cli-email').value.trim();
+
+      const markErr = (id) => { panel.querySelector(id).style.borderColor = '#ef4444'; panel.querySelector(id).focus(); };
+      if (!cliNome)  { showFeedback('Informe o nome ou razão social do cliente.', 'error'); markErr('#cw-ap-cli-nome');  return; }
+      if (!cliDoc)   { showFeedback('Informe o CPF ou CNPJ do cliente.', 'error');          markErr('#cw-ap-cli-doc');   return; }
+      if (!cliCep)   { showFeedback('Informe o CEP do cliente.', 'error');                  markErr('#cw-ap-cli-cep');   return; }
+      if (!cliEnd)   { showFeedback('Informe o endereço do cliente.', 'error');              markErr('#cw-ap-cli-end');   return; }
+      if (!cliTel)   { showFeedback('Informe o telefone do cliente.', 'error');              markErr('#cw-ap-cli-tel');   return; }
+      if (!cliEmail) { showFeedback('Informe o e-mail do cliente.', 'error');                markErr('#cw-ap-cli-email'); return; }
+
+      if (!desc)  { showFeedback('Preencha a descrição.', 'error'); return; }
+      if (!valor) { showFeedback('Informe o valor total.', 'error'); return; }
+
+      // Comprovante de pagamento obrigatório (URL ou arquivo)
+      const temPgto = urlPgto || filePgto;
+      if (!temPgto) {
+        showFeedback('Anexe ou cole a URL do comprovante de pagamento.', 'error');
+        panel.querySelector('#cw-ap-url-pgto').style.borderColor = '#ef4444';
+        panel.querySelector('#cw-ap-url-pgto').focus();
+        return;
+      }
+
+      // Comprovante de aprovação obrigatório (URL, arquivo ou print)
+      const temAprov = urlAprov || fileAprov || screenshotBlob;
+      if (!temAprov) {
+        showFeedback('Anexe, cole a URL ou tire um print do comprovante de aprovação.', 'error');
+        panel.querySelector('#cw-ap-url-aprov').style.borderColor = '#ef4444';
+        panel.querySelector('#cw-ap-url-aprov').focus();
+        return;
+      }
+
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Salvando...';
+
+      try {
+        let finalUrlPgto  = urlPgto  || null;
+        let finalUrlAprov = urlAprov || null;
+        const ts = Date.now();
+
+        const safeName = name => name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        if (filePgto)       finalUrlPgto  = await uploadFile(filePgto,  'quote-files', `${quote.id}/pgto_${ts}_${safeName(filePgto.name)}`);
+        if (fileAprov)      finalUrlAprov = await uploadFile(fileAprov, 'quote-files', `${quote.id}/aprov_${ts}_${safeName(fileAprov.name)}`);
+        if (screenshotBlob) finalUrlAprov = await uploadFile(screenshotBlob, 'quote-files', `${quote.id}/print_${ts}.png`);
+
+        await sbPatch('quotes', `id=eq.${quote.id}`, {
+          status:                    'APROVADO_CLIENTE',
+          aprovado_descricao:        desc,
+          aprovado_valor_total:      valor,
+          valor_aprovado:            valor,
+          approved_quote_version_id: vId,
+          cliente_nome:              cliNome,
+          cliente_cpf_cnpj:          cliDoc,
+          cliente_email:             cliEmail,
+          endereco_entrega:          `${cliCep} - ${cliEnd}`,
+          cliente_telefone:          cliTel,
+        });
+
+        // 1) Limpar itens aprovados anteriores
+        await sbDelete('quote_approved_items', `quote_id=eq.${quote.id}`);
+
+        // 2) Coletar itens selecionados e inserir
+        const checkedItems = Array.from(
+          panel.querySelectorAll('.cw-item-chk:checked')
+        ).map(chk => ({
+          quote_id:              quote.id,
+          quote_version_id:      Number(vId),
+          quote_version_item_id: Number(chk.dataset.id),
+        }));
+        if (checkedItems.length > 0) {
+          await sbPost('quote_approved_items', checkedItems);
+        }
+
+        // OS nao e criada aqui — sera atribuida manualmente no Financeiro
+        // (botao "Adicionar numero de OS"), igual ao fluxo do app.
+        // Contrato social fica registrado em quote_payments.observacoes_financeiro abaixo.
+
+        if (prazo || forma || regras || finalUrlPgto) {
+          await sbPost('quote_payments', {
+            quote_id:                  quote.id,
+            forma_pagamento:           forma  || null,
+            condicoes_pagamento:       prazo  || null,
+            comprovante_pagamento_url: finalUrlPgto || null,
+            observacoes_financeiro:    `${regras || ''} | Contrato: ${contrato === 'sim' ? 'Sim' : 'Não'}`,
+          });
+        }
+
+        if (finalUrlAprov) {
+          await sbPost('quote_files', {
+            quote_id:    quote.id,
+            tipo:        'comprovante_aprovacao',
+            arquivo_url: finalUrlAprov,
+          });
+        }
+
+        showFeedback('✅ Orçamento aprovado! Atribua o número da OS no Financeiro.', 'success');
+        setTimeout(() => { panel.remove(); onSuccess?.(); }, 1800);
+
+      } catch(e) {
+        showFeedback('Erro: ' + e.message, 'error');
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Confirmar aprovação';
+      }
+    });
+
+    function showFeedback(msg, type) {
+      feedback.style.display = 'block';
+      feedback.style.background = type === 'success' ? '#d1fae5' : '#fee2e2';
+      feedback.style.color      = type === 'success' ? '#065f46' : '#991b1b';
+      feedback.textContent = msg;
+      if (type === 'error') setTimeout(() => { feedback.style.display = 'none'; }, 4000);
+    }
+
+    // Scroll suave até o painel
+    setTimeout(() => panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100);
+  }
+
+  /* ── Renderiza lista de orçamentos ── */
+  function renderList(container, quotes, onReload) {
+    if (quotes.length === 0) {
+      container.innerHTML = `
+        <div class="cw-q-empty" style="text-align:center;padding:20px 8px;color:#9ca3af;font-size:12px;">
+          <div style="font-size:1.8rem;margin-bottom:6px;">📭</div>
+          Nenhum orçamento encontrado para este cliente.
+        </div>`;
+      return;
+    }
+
+    const header = `
+      <div class="cw-q-counter" style="font-size:11px;font-weight:600;color:#6b7280;
+           text-transform:uppercase;letter-spacing:.04em;
+           padding:0 2px 4px;border-bottom:1px solid #f3f4f6;margin-bottom:2px;">
+        ${quotes.length} orçamento${quotes.length > 1 ? 's' : ''} encontrado${quotes.length > 1 ? 's' : ''}
+      </div>`;
+
+    const canApprove = q => !['APROVADO_CLIENTE','OS_GERADA'].includes(q.status);
+
+    const cards = quotes.map(q => `
+      <div class="cw-q-card" data-qid="${q.id}" style="
+        border:1px solid #e5e7eb;
+        border-left:3px solid ${(STATUS_MAP[q.status]||{color:'#d1d5db'}).color};
+        border-radius:7px;background:#fff;
+        box-shadow:0 1px 2px rgba(0,0,0,.04);
+        overflow:hidden;
+      ">
+        <!-- Cabeçalho clicável -->
+        <div class="cw-q-card-header" style="
+          padding:9px 11px;display:flex;flex-direction:column;gap:5px;cursor:pointer;
+        ">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+            <span class="cw-q-code" style="font-size:12.5px;font-weight:700;color:#111827;">${q.codigo_orcamento || '#'+q.id}</span>
+            ${statusBadge(q.status)}
+          </div>
+          <div style="display:flex;align-items:center;gap:5px;">
+            ${setorBadge(q.setor)}
+            ${q.aprovado_valor_total ? `<span style="font-size:11px;color:#6b7280;margin-left:auto;">${formatCurrency(q.aprovado_valor_total)}</span>` : ''}
+          </div>
+          <div class="cw-q-desc" style="
+            font-size:12px;color:#374151;line-height:1.5;
+            display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+            padding:5px 7px;background:#f9fafb;border-radius:5px;border:1px solid #f3f4f6;
+          ">${q.descricao_pedido || '<span style="color:#9ca3af;font-style:italic;">Sem descrição</span>'}</div>
+          <div class="cw-q-date" style="display:flex;align-items:center;gap:4px;color:#9ca3af;font-size:11px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+            ${formatDate(q.created_at)}
+          </div>
+        </div>
+
+        <!-- Collapse -->
+        <div class="cw-q-collapse" style="display:none;padding:0 11px 10px;border-top:1px solid #f3f4f6;">
+          ${canApprove(q) ? `
+            <div style="display:flex;gap:6px;margin-top:9px;">
+              <button class="cw-q-approve-btn" data-qid="${q.id}" style="
+                flex:1;padding:7px;border:none;border-radius:7px;
+                background:#10b981;color:#fff;font-size:12.5px;font-weight:600;
+                font-family:inherit;cursor:pointer;
+                display:flex;align-items:center;justify-content:center;gap:6px;
+              ">✅ Aprovar</button>
+              <button class="cw-q-view-btn" data-qid="${q.id}" style="
+                padding:7px 12px;border:1.5px solid #6366f1;border-radius:7px;
+                background:transparent;color:#6366f1;font-size:12.5px;font-weight:600;
+                font-family:inherit;cursor:pointer;white-space:nowrap;
+              ">👁 Ver</button>
+            </div>
+          ` : `
+            <div style="margin-top:9px;padding:6px 10px;background:#d1fae5;border-radius:6px;font-size:11.5px;color:#065f46;text-align:center;font-weight:600;">
+              ✅ Orçamento já aprovado
+            </div>
+          `}
+        </div>
+      </div>`).join('');
+
+    container.innerHTML = header + cards;
+
+    // Toggle collapse ao clicar no card
+    $$('.cw-q-card-header', container).forEach(hdr => {
+      on(hdr, 'click', () => {
+        const collapse = hdr.nextElementSibling;
+        const isOpen = collapse.style.display !== 'none';
+        // Fecha todos
+        $$('.cw-q-collapse', container).forEach(c => c.style.display = 'none');
+        if (!isOpen) collapse.style.display = 'block';
+      });
+    });
+
+    // Botão Ver Pedido
+    $$('.cw-q-view-btn', container).forEach(btn => {
+      on(btn, 'click', e => {
+        e.stopPropagation();
+        const q = quotes.find(x => String(x.id) === String(btn.dataset.qid));
+        if (q) showViewModal(q);
+      });
+    });
+
+    // Botão aprovar
+    $$('.cw-q-approve-btn', container).forEach(btn => {
+      on(btn, 'click', e => {
+        e.stopPropagation();
+        const qId = btn.dataset.qid;
+        const q   = quotes.find(x => String(x.id) === String(qId));
+        if (!q) return;
+        const card = btn.closest('.cw-q-card');
+        buildApprovalPanel(q, card, () => onReload());
+      });
+    });
+  }
+
+  /* ── Estilos ── */
+  function injectStyles() {
+    if ($('#cw-quotes-sty-uni')) return;
+    const s = document.createElement('style');
+    s.id = 'cw-quotes-sty-uni';
+    s.textContent = `
+      #cw-quotes-uni * { box-sizing: border-box; }
+      #cw-qh-uni {
+        display:flex;align-items:center;width:100%;border-radius:8px;
+        background:#f9fafb;outline:1px solid #e5e7eb;margin:0;cursor:pointer;
+        justify-content:space-between;padding:8px 14px;border:none;
+        font-family:inherit;transition:background .15s;
+      }
+      #cw-qh-uni:hover { background:#f3f4f6; }
+      #cw-qh-uni h5 { font-size:13px;font-weight:600;color:#111827;margin:0; }
+      #cw-qh-uni .hdr-left { display:flex;align-items:center;gap:7px; }
+      #cw-qc-uni { transition:transform .2s;color:#6366f1; }
+      #cw-qb-uni {
+        outline:1px solid #e5e7eb;outline-offset:-1px;
+        border-radius:0 0 8px 8px;background:#fafafa;
+        overflow:hidden;transition:max-height .25s ease, opacity .2s;
+      }
+      #cw-ql-uni { display:flex;flex-direction:column;gap:6px;padding:10px 10px 12px; }
+      @keyframes cw-q-spin { to { transform:rotate(360deg); } }
+      .cw-q-spinner {
+        width:14px;height:14px;border-radius:50%;
+        border:2px solid #e5e7eb;border-top-color:#6366f1;
+        animation:cw-q-spin .6s linear infinite;display:inline-block;
+      }
+      /* Dark mode */
+      .dark #cw-qh-uni { background:#1e2530;outline-color:#374151; }
+      .dark #cw-qh-uni:hover { background:#252d3a; }
+      .dark #cw-qh-uni h5 { color:#f3f4f6; }
+      .dark #cw-qb-uni { background:#171e27;outline-color:#374151; }
+      .dark .cw-q-card { background:#1e2530 !important;border-color:#374151 !important; }
+      .dark .cw-q-desc { background:#252d3a !important;border-color:#374151 !important;color:#d1d5db !important; }
+      .dark .cw-q-code { color:#f3f4f6 !important; }
+      .dark .cw-q-date { color:#6b7280 !important; }
+      .dark .cw-q-counter { color:#6b7280 !important;border-color:#374151 !important; }
+      .dark .cw-q-empty { color:#6b7280 !important; }
+      .dark .cw-q-spinner { border-color:#374151;border-top-color:#818cf8; }
+
+      /* ── Painel de aprovação ── */
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+
+        .cw-approval-panel {
+          font-family: 'DM Sans', system-ui, sans-serif;
+        }
+        .cw-approval-panel * { box-sizing:border-box; }
+
+        /* ── Labels ── */
+        .cw-ap-label {
+          font-size:10px;font-weight:700;color:#9ca3af;
+          text-transform:uppercase;letter-spacing:.07em;
+          display:block;margin-bottom:4px;
+        }
+
+        /* ── Inputs ── */
+        .cw-ap-input, .cw-ap-select, .cw-ap-textarea {
+          width:100%;padding:7px 10px;
+          border:1.5px solid #e5e7eb;border-radius:8px;
+          font-size:12.5px;font-family:inherit;
+          color:#111827;background:#fff;outline:none;resize:vertical;
+          transition:border-color .15s, box-shadow .15s, background .15s;
+        }
+        .cw-ap-input:focus, .cw-ap-select:focus, .cw-ap-textarea:focus {
+          border-color:#6366f1;
+          box-shadow:0 0 0 3px rgba(99,102,241,.12);
+        }
+        .cw-ap-input::placeholder, .cw-ap-textarea::placeholder { color:#d1d5db; }
+
+        /* ── Seções ── */
+        .cw-ap-block {
+          padding:11px 13px;border-bottom:1px solid #f3f4f6;
+          display:flex;flex-direction:column;gap:8px;
+        }
+        .cw-ap-block:last-of-type { border-bottom:none; }
+
+        .cw-ap-block-title {
+          display:flex;align-items:center;gap:6px;
+          font-size:10px;font-weight:700;
+          color:#6b7280;text-transform:uppercase;letter-spacing:.07em;
+        }
+        .cw-ap-block-title::after {
+          content:'';flex:1;height:1px;background:#f3f4f6;
+        }
+
+        .cw-ap-field { display:flex;flex-direction:column;gap:3px; }
+        .cw-ap-2col { display:grid;grid-template-columns:1fr 1fr;gap:8px; }
+
+        /* ── Tabela itens ── */
+        .cw-ap-table { width:100%;border-collapse:collapse;font-size:11.5px; }
+        .cw-ap-table th {
+          padding:5px 8px;background:#f9fafb;
+          color:#9ca3af;font-size:9.5px;font-weight:700;
+          text-transform:uppercase;letter-spacing:.05em;
+          border-bottom:1px solid #e5e7eb;text-align:left;
+        }
+        .cw-ap-table td {
+          padding:6px 8px;border-bottom:1px solid #f3f4f6;
+          color:#374151;
+        }
+        .cw-ap-table tr:last-child td { border-bottom:none; }
+        .cw-ap-table tr:hover td { background:#fafafa;cursor:pointer; }
+
+        /* ── Botão de ação secundário ── */
+        .cw-ap-action-btn {
+          display:inline-flex;align-items:center;gap:4px;
+          padding:4px 9px;border-radius:6px;font-size:11px;font-weight:600;
+          border:1.5px solid #e5e7eb;background:#f9fafb;color:#374151;
+          cursor:pointer;transition:all .15s;font-family:inherit;white-space:nowrap;
+        }
+        .cw-ap-action-btn:hover { background:#f3f4f6;border-color:#d1d5db; }
+
+        .cw-ap-file-label {
+          display:inline-flex;align-items:center;gap:4px;
+          font-size:11px;font-weight:600;color:#6366f1;cursor:pointer;
+          padding:4px 9px;border-radius:6px;border:1.5px dashed #c7d2fe;
+          background:#eef2ff;transition:all .15s;
+        }
+        .cw-ap-file-label:hover { background:#e0e7ff; }
+
+        /* dark mode via data-theme (aplicado via JS) */
+        .dark .cw-approval-panel {
+          background:#1a2235 !important;border-color:#2d3748 !important;
+        }
+        .dark .cw-approval-panel .cw-ap-block { border-color:#2d3748; }
+        .dark .cw-approval-panel .cw-ap-block-title { color:#4b5563; }
+        .dark .cw-approval-panel .cw-ap-block-title::after { background:#2d3748; }
+        .dark .cw-approval-panel .cw-ap-label { color:#6b7280; }
+        .dark .cw-approval-panel .cw-ap-input,
+        .dark .cw-approval-panel .cw-ap-select,
+        .dark .cw-approval-panel .cw-ap-textarea {
+          background:#252d3a !important;border-color:#374151 !important;color:#f3f4f6 !important;
+        }
+        .dark .cw-approval-panel .cw-ap-input::placeholder,
+        .dark .cw-approval-panel .cw-ap-textarea::placeholder { color:#4b5563; }
+        .dark .cw-approval-panel .cw-ap-input:focus,
+        .dark .cw-approval-panel .cw-ap-select:focus,
+        .dark .cw-approval-panel .cw-ap-textarea:focus {
+          border-color:#818cf8 !important;
+          box-shadow:0 0 0 3px rgba(129,140,248,.15) !important;
+        }
+        .dark .cw-approval-panel .cw-ap-table th { background:#252d3a;color:#4b5563; }
+        .dark .cw-approval-panel .cw-ap-table td { border-color:#2d3748;color:#d1d5db; }
+        .dark .cw-approval-panel .cw-ap-table tr:hover td { background:#252d3a; }
+        .dark .cw-approval-panel .cw-ap-action-btn {
+          background:#252d3a !important;border-color:#374151 !important;color:#d1d5db !important;
+        }
+        .dark .cw-approval-panel .cw-ap-action-btn:hover { background:#2d3748 !important; }
+        .dark .cw-approval-panel .cw-ap-file-label {
+          background:#1e2d3d !important;border-color:#3730a3 !important;color:#818cf8 !important;
+        }
+        .dark .cw-approval-panel > div:first-child {
+          background:linear-gradient(135deg,#052e16 0%,#064e3b 100%) !important;
+          border-color:#065f46 !important;
+        }
+        .dark .cw-approval-panel > div:last-child {
+          background:#1e2530 !important;border-color:#2d3748 !important;
+        }
+        .dark .cw-approval-panel #cw-ap-confirm {
+          box-shadow:0 2px 8px rgba(16,185,129,.2) !important;
+        }
+    `;
+    document.head.appendChild(s);
+  }
+
+  /* ── Monta painel ── */
+  function buildPanel() {
+    const wrap = document.createElement('div');
+    wrap.id = 'cw-quotes-uni';
+
+    wrap.innerHTML = `
+      <button id="cw-qh-uni">
+        <div class="hdr-left">
+          <span style="font-size:.95rem;">${CFG.SECTION_ICON}</span>
+          <h5>${CFG.SECTION_TITLE}</h5>
+        </div>
+        <div id="cw-qc-uni">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+      </button>
+      <div id="cw-qb-uni" style="max-height:${CFG.START_OPEN?'2000px':'0'};opacity:${CFG.START_OPEN?'1':'0'};">
+        <div id="cw-ql-uni">
+          <div style="display:flex;align-items:center;justify-content:center;padding:16px;gap:8px;color:#9ca3af;font-size:12px;">
+            <span class="cw-q-spinner"></span> Carregando...
+          </div>
+        </div>
+      </div>`;
+
+    let isOpen = CFG.START_OPEN;
+    const header  = wrap.querySelector('#cw-qh-uni');
+    const body    = wrap.querySelector('#cw-qb-uni');
+    const chevron = wrap.querySelector('#cw-qc-uni');
+    const list    = wrap.querySelector('#cw-ql-uni');
+
+    on(header, 'click', () => {
+      isOpen = !isOpen;
+      body.style.maxHeight = isOpen ? '2000px' : '0';
+      body.style.opacity   = isOpen ? '1' : '0';
+      chevron.style.transform = isOpen ? 'rotate(180deg)' : 'rotate(0deg)';
+    });
+
+    async function load() {
+      list.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:16px;gap:8px;color:#9ca3af;font-size:12px;"><span class="cw-q-spinner"></span> Carregando...</div>`;
+
+      let contact = await getContactData();
+      let attempts = 0;
+      while ((!contact.whatsapp && !contact.nome) && attempts < 5) {
+        await new Promise(r => setTimeout(r, 500));
+        contact = await getContactData();
+        attempts++;
+      }
+
+      try {
+        const quotes = await fetchQuotes(contact);
+        renderList(list, quotes, () => load());
+      } catch (e) {
+        list.innerHTML = `<div style="color:#ef4444;font-size:12px;padding:8px;">Erro ao carregar orçamentos.</div>`;
+      }
+    }
+
+    load();
+
+    const _push = history.pushState.bind(history);
+    history.pushState = function (...args) {
+      _push(...args);
+      setTimeout(() => { if ($('#cw-quotes-uni')) load(); }, 800);
+    };
+
+    return wrap;
+  }
+
+  /* ── Injeta no painel direito ── */
+  function findContainer() {
+    const lg = $('div.list-group.pb-8.px-2');
+    if (lg) return $('div.flex.flex-col.gap-3', lg) || lg;
+    return $('div.conversation--actions')?.parentElement || null;
+  }
+
+  function ensurePanel() {
+    if ($('#cw-quotes-uni')) return;
+    const container = findContainer();
+    if (!container) return;
+    injectStyles();
+    const outer = document.createElement('div');
+    outer.className = 'conversation--actions';
+    outer.appendChild(buildPanel());
+    const formSection = $('div.conversation--actions:has(#cw-pedido-ind), div.conversation--actions:has(#cw-pedido-exp)');
+    if (formSection?.nextSibling) {
+      container.insertBefore(outer, formSection.nextSibling);
+    } else {
+      container.insertBefore(outer, container.firstChild);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', ensurePanel);
+  } else {
+    ensurePanel();
+  }
+  new MutationObserver(() => ensurePanel()).observe(document.body, { childList: true, subtree: true });
+
+  // ── Modal de Visualização/Edição ──
+  function showViewModal(q) {
+    document.getElementById('cw-view-modal')?.remove();
+    const isDark = document.documentElement.classList.contains('dark');
+    const bg = isDark ? '#1e293b' : '#ffffff';
+    const border = isDark ? '#334155' : '#e5e7eb';
+    const txt = isDark ? '#f1f5f9' : '#111827';
+    const sub = isDark ? '#94a3b8' : '#6b7280';
+    const inp = isDark ? '#0f172a' : '#f9fafb';
+
+    const overlay = document.createElement('div');
+    overlay.id = 'cw-view-modal';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px;';
+
+    overlay.innerHTML = `
+      <div style="background:${bg};border-radius:12px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);border:1px solid ${border};font-family:inherit;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid ${border};position:sticky;top:0;background:${bg};z-index:1;">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:${txt};">📋 Pedido ${q.codigo_orcamento || '#'+q.id}</div>
+            <div style="font-size:11.5px;color:${sub};margin-top:2px;">${q.cliente_nome || ''} · ${formatDate(q.created_at)}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="cw-vm-edit-toggle" style="padding:5px 12px;border:1.5px solid #6366f1;border-radius:7px;background:transparent;color:#6366f1;font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;">✏️ Editar</button>
+            <button id="cw-vm-close" style="background:rgba(0,0,0,.07);border:none;cursor:pointer;color:${sub};font-size:16px;width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;">✕</button>
+          </div>
+        </div>
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
+          <div style="background:${inp};border-radius:8px;padding:12px;border:1px solid ${border};">
+            <div style="font-size:11px;font-weight:700;letter-spacing:.07em;color:${sub};text-transform:uppercase;margin-bottom:8px;">👤 Cliente</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              ${vmField('Nome', q.cliente_nome, txt, sub)}
+              ${vmField('CPF/CNPJ', q.cliente_cpf_cnpj, txt, sub)}
+              ${vmField('Telefone', q.cliente_whatsapp || q.cliente_telefone, txt, sub)}
+              ${vmField('Endereço', q.endereco_entrega, txt, sub)}
+            </div>
+          </div>
+          <div style="background:${inp};border-radius:8px;padding:12px;border:1px solid ${border};">
+            <div style="font-size:11px;font-weight:700;letter-spacing:.07em;color:${sub};text-transform:uppercase;margin-bottom:8px;">📄 Pedido</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              ${vmField('Código', q.codigo_orcamento, txt, sub)}
+              ${vmField('Status', q.status, txt, sub)}
+              ${vmField('Setor', q.setor, txt, sub)}
+              ${vmField('Valor Aprovado', q.aprovado_valor_total ? 'R$ '+Number(q.aprovado_valor_total).toLocaleString('pt-BR',{minimumFractionDigits:2}) : null, txt, sub)}
+            </div>
+            ${q.descricao_pedido ? `<div style="margin-top:8px;"><div style="font-size:10.5px;color:${sub};margin-bottom:3px;">Descrição</div><div style="font-size:12.5px;color:${txt};">${q.descricao_pedido}</div></div>` : ''}
+          </div>
+          <div id="cw-vm-edit-section" style="display:none;background:${inp};border-radius:8px;padding:12px;border:1.5px solid #6366f1;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:.07em;color:#6366f1;text-transform:uppercase;margin-bottom:10px;">✏️ Editar Pedido</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div>
+                <label style="font-size:10.5px;font-weight:700;color:${sub};text-transform:uppercase;">Nome / Razão Social</label>
+                <input id="cw-vm-nome" value="${(q.cliente_nome||'').replace(/"/g,'&quot;')}" style="width:100%;margin-top:3px;padding:6px 8px;border:1.5px solid ${border};border-radius:6px;background:${bg};color:${txt};font-size:12.5px;font-family:inherit;box-sizing:border-box;" />
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <div>
+                  <label style="font-size:10.5px;font-weight:700;color:${sub};text-transform:uppercase;">CPF / CNPJ</label>
+                  <input id="cw-vm-doc" value="${(q.cliente_cpf_cnpj||'').replace(/"/g,'&quot;')}" style="width:100%;margin-top:3px;padding:6px 8px;border:1.5px solid ${border};border-radius:6px;background:${bg};color:${txt};font-size:12.5px;font-family:inherit;box-sizing:border-box;" />
+                </div>
+                <div>
+                  <label style="font-size:10.5px;font-weight:700;color:${sub};text-transform:uppercase;">Telefone</label>
+                  <input id="cw-vm-tel" value="${(q.cliente_whatsapp||q.cliente_telefone||'').replace(/"/g,'&quot;')}" style="width:100%;margin-top:3px;padding:6px 8px;border:1.5px solid ${border};border-radius:6px;background:${bg};color:${txt};font-size:12.5px;font-family:inherit;box-sizing:border-box;" />
+                </div>
+              </div>
+              <div>
+                <label style="font-size:10.5px;font-weight:700;color:${sub};text-transform:uppercase;">Endereço</label>
+                <input id="cw-vm-end" value="${(q.endereco_entrega||'').replace(/"/g,'&quot;')}" style="width:100%;margin-top:3px;padding:6px 8px;border:1.5px solid ${border};border-radius:6px;background:${bg};color:${txt};font-size:12.5px;font-family:inherit;box-sizing:border-box;" />
+              </div>
+              <div>
+                <label style="font-size:10.5px;font-weight:700;color:${sub};text-transform:uppercase;">Descrição do Pedido</label>
+                <textarea id="cw-vm-desc" rows="2" style="width:100%;margin-top:3px;padding:6px 8px;border:1.5px solid ${border};border-radius:6px;background:${bg};color:${txt};font-size:12.5px;font-family:inherit;resize:vertical;box-sizing:border-box;">${q.descricao_pedido||''}</textarea>
+              </div>
+              <div>
+                <label style="font-size:10.5px;font-weight:700;color:${sub};text-transform:uppercase;">Observação da Edição <span style="color:#ef4444;">*</span></label>
+                <textarea id="cw-vm-obs" rows="2" placeholder="Motivo ou observação sobre esta edição..." style="width:100%;margin-top:3px;padding:6px 8px;border:1.5px solid ${border};border-radius:6px;background:${bg};color:${txt};font-size:12.5px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
+              </div>
+              <div id="cw-vm-feedback" style="display:none;padding:6px 8px;border-radius:6px;font-size:12px;font-weight:500;"></div>
+              <button id="cw-vm-save" style="padding:8px;border:none;border-radius:8px;background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;font-size:12.5px;font-weight:700;font-family:inherit;cursor:pointer;">💾 Salvar Alterações</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelector('#cw-vm-close').addEventListener('click', () => overlay.remove());
+
+    const editSection = overlay.querySelector('#cw-vm-edit-section');
+    const editToggle  = overlay.querySelector('#cw-vm-edit-toggle');
+    editToggle.addEventListener('click', () => {
+      const open = editSection.style.display !== 'none';
+      editSection.style.display = open ? 'none' : 'block';
+      editToggle.textContent = open ? '✏️ Editar' : '✖ Fechar Edição';
+    });
+
+    overlay.querySelector('#cw-vm-save').addEventListener('click', async () => {
+      const obs = overlay.querySelector('#cw-vm-obs').value.trim();
+      const fb  = overlay.querySelector('#cw-vm-feedback');
+      if (!obs) {
+        fb.style.cssText = 'display:block;padding:6px 8px;border-radius:6px;font-size:12px;font-weight:500;background:#fef2f2;color:#dc2626;';
+        fb.textContent = 'Informe a observação da edição.';
+        return;
+      }
+      const btn = overlay.querySelector('#cw-vm-save');
+      btn.disabled = true; btn.textContent = 'Salvando...';
+      try {
+        await sbPatch('quotes', `id=eq.${q.id}`, {
+          cliente_nome:     overlay.querySelector('#cw-vm-nome').value.trim() || null,
+          cliente_cpf_cnpj: overlay.querySelector('#cw-vm-doc').value.trim()  || null,
+          cliente_whatsapp: overlay.querySelector('#cw-vm-tel').value.trim()  || null,
+          endereco_entrega: overlay.querySelector('#cw-vm-end').value.trim()  || null,
+          descricao_pedido: overlay.querySelector('#cw-vm-desc').value.trim() || null,
+          observacoes:      obs,
+        });
+        fb.style.cssText = 'display:block;padding:6px 8px;border-radius:6px;font-size:12px;font-weight:500;background:#f0fdf4;color:#16a34a;';
+        fb.textContent = '✅ Salvo com sucesso!';
+        btn.textContent = '💾 Salvar Alterações'; btn.disabled = false;
+      } catch(err) {
+        fb.style.cssText = 'display:block;padding:6px 8px;border-radius:6px;font-size:12px;font-weight:500;background:#fef2f2;color:#dc2626;';
+        fb.textContent = 'Erro: ' + err.message;
+        btn.textContent = '💾 Salvar Alterações'; btn.disabled = false;
+      }
+    });
+  }
+
+  function vmField(label, value, txt, sub) {
+    if (!value) return '';
+    return `<div><div style="font-size:10.5px;color:${sub};margin-bottom:2px;">${label}</div><div style="font-size:12.5px;color:${txt};font-weight:500;">${value}</div></div>`;
+  }
+
+})();
+</script>

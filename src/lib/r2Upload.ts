@@ -42,15 +42,24 @@ export async function uploadFileToR2({
 
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `${folder}/${quoteId ?? 'sem-id'}/${Date.now()}_${safeName}`;
-  const url = `${baseUrl}/${path}`;
   const contentType = file.type?.trim() ? file.type : 'application/octet-stream';
 
-  const response = await fetch(url, {
+  const presignUrl = `${baseUrl}/presign?key=${encodeURIComponent(path)}&contentType=${encodeURIComponent(contentType)}`;
+  const presignResponse = await fetch(presignUrl, {
+    headers: { 'X-Custom-Auth-Key': authKey },
+  });
+
+  if (!presignResponse.ok) {
+    const body = await presignResponse.text().catch(() => presignResponse.statusText);
+    console.error('[R2 upload] presign status:', presignResponse.status, 'body:', body);
+    throw new R2UploadError(`Falha ao preparar upload (${presignResponse.status}): ${body}`);
+  }
+
+  const { uploadUrl, publicUrl } = await presignResponse.json();
+
+  const response = await fetch(uploadUrl, {
     method: 'PUT',
-    headers: {
-      'Content-Type': contentType,
-      'X-Custom-Auth-Key': authKey,
-    },
+    headers: { 'Content-Type': contentType },
     body: file,
   });
 
@@ -60,5 +69,5 @@ export async function uploadFileToR2({
     throw new R2UploadError(`Falha ao enviar arquivo (${response.status}): ${body}`);
   }
 
-  return { publicUrl: url, key: path };
+  return { publicUrl, key: path };
 }
