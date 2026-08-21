@@ -43,6 +43,9 @@ VITE_EVOLUTION_API_URL=          # URL base da Evolution API (WhatsApp)
 VITE_EVOLUTION_INSTANCE=         # nome da instância Evolution
 VITE_EVOLUTION_API_KEY=          # apikey da Evolution
 VITE_VENDEDOR_WHATSAPP=          # número fixo do vendedor (ex: 5511999999999)
+VITE_VENDEDOR_WHATSAPP_THIAGO=   # WhatsApp do vendedor Thiago (ex: 5511999999999)
+VITE_VENDEDOR_WHATSAPP_MARCELO=  # WhatsApp do vendedor Marcelo
+VITE_N8N_WEBHOOK_ORCAMENTO_URL=  # URL do webhook n8n que dispara o WhatsApp do orçamento pronto
 ```
 
 ---
@@ -257,6 +260,22 @@ Body: { number, mediatype: 'document', mimetype: 'application/pdf', media: pdfUr
 ```
 
 O número de destino é fixo: `VITE_VENDEDOR_WHATSAPP`.
+
+### Envio automático de orçamento pronto (webhook n8n)
+
+Botão "Enviar orçamento" em `QuotesPage.tsx` (linha da tabela) e `QuoteDrawer.tsx` (cabeçalho). Regra de elegibilidade centralizada em `src/lib/quoteVendorWebhook.ts`. Visível apenas quando TODAS as condições abaixo são verdadeiras:
+- setor ∈ { GRAFICA_INDUSTRIAL, GRAFICA_EXPRESSA } (não aparece em COMUNICA_VISUAL)
+- vendedor_nome ∈ { "Thiago", "Marcelo" }
+- status ∈ { PRONTO_PARA_ENVIAR, ORCAMENTO_ENVIADO }
+- arquivo_orcamento_url presente
+
+Ao clicar, dispara:
+```
+POST {VITE_N8N_WEBHOOK_ORCAMENTO_URL}
+Body: { vendedor_nome, vendedor_telefone, cliente_nome, codigo_orcamento, arquivo_orcamento_url, quote_id }
+```
+
+O destino da mensagem WhatsApp é o **celular do próprio vendedor** (Thiago/Marcelo), resolvido via `VITE_VENDEDOR_WHATSAPP_THIAGO` / `VITE_VENDEDOR_WHATSAPP_MARCELO` — não é o WhatsApp do cliente. O n8n recebe o payload e decide como formatar/enviar a mensagem final.
 
 ---
 

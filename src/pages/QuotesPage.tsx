@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Plus, FileText, Loader2, RefreshCw, Search, X, Printer, DollarSign, Send, Trash2 } from 'lucide-react';
+import { Plus, FileText, Loader2, RefreshCw, Search, X, Printer, DollarSign, Send, Trash2, MessageCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { enviarParaImpressao, OrderForPrint } from '../lib/printJobs';
+import { isEligibleForVendorWebhook, sendQuoteToVendorWebhook } from '../lib/quoteVendorWebhook';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
 import NewQuoteModal from '../components/NewQuoteModal';
@@ -34,6 +35,7 @@ interface Quote {
   prioridade: string;
   vendedor_nome: string | null;
   origem: string;
+  arquivo_orcamento_url: string | null;
   order?: QuoteOrder | null;
 }
 
@@ -73,6 +75,7 @@ export default function QuotesPage({ setor }: QuotesPageProps) {
   const [sendingPrintJobId, setSendingPrintJobId] = useState<number | null>(null);
   const [selectedFinanceId, setSelectedFinanceId] = useState<number | null>(null);
   const [markingEnviadoId, setMarkingEnviadoId] = useState<number | null>(null);
+  const [sendingVendorWebhookId, setSendingVendorWebhookId] = useState<number | null>(null);
   const [deleteTargetQuote, setDeleteTargetQuote] = useState<Quote | null>(null);
 
   const [filterStatus, setFilterStatus] = useState<string>('');
@@ -129,6 +132,7 @@ export default function QuotesPage({ setor }: QuotesPageProps) {
         prioridade,
         vendedor_nome,
         origem,
+        arquivo_orcamento_url,
         order:orders(id, setor, codigo_os, status_os)
       `)
       .eq('setor', setor);
@@ -243,6 +247,21 @@ export default function QuotesPage({ setor }: QuotesPageProps) {
       setToast('Orçamento marcado como enviado');
     }
     setMarkingEnviadoId(null);
+  }
+
+  async function handleEnviarOrcamentoVendedor(e: React.MouseEvent, q: Quote) {
+    e.stopPropagation();
+    if (!q.vendedor_nome || !q.arquivo_orcamento_url) return;
+    setSendingVendorWebhookId(q.id);
+    const result = await sendQuoteToVendorWebhook({
+      vendedorNome: q.vendedor_nome,
+      arquivoOrcamentoUrl: q.arquivo_orcamento_url,
+      clienteNome: q.cliente_nome,
+      codigoOrcamento: q.codigo_orcamento,
+      quoteId: q.id,
+    });
+    setToast(result.message);
+    setSendingVendorWebhookId(null);
   }
 
   const baseData = activeTab === 'orcamentos' ? quotes : aprovados;
@@ -530,6 +549,26 @@ export default function QuotesPage({ setor }: QuotesPageProps) {
                                 <Send className="w-3.5 h-3.5" />
                               )}
                               Marcar enviado
+                            </button>
+                          )}
+                          {activeTab === 'orcamentos' && isEligibleForVendorWebhook({
+                            setor,
+                            vendedor_nome: q.vendedor_nome,
+                            status: q.status,
+                            arquivo_orcamento_url: q.arquivo_orcamento_url,
+                          }) && (
+                            <button
+                              onClick={(e) => handleEnviarOrcamentoVendedor(e, q)}
+                              disabled={sendingVendorWebhookId === q.id}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Enviar orçamento ao vendedor via WhatsApp"
+                            >
+                              {sendingVendorWebhookId === q.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <MessageCircle className="w-3.5 h-3.5" />
+                              )}
+                              Enviar orçamento
                             </button>
                           )}
                           {activeTab === 'orcamentos' && q.status === 'AJUSTE_NECESSARIO' && (

@@ -32,6 +32,7 @@ const ACTION_META: Record<string, ActionMeta> = {
   PRONTO_PARA_ENVIAR:    { label: 'Marcado como pronto para enviar', icon: Clock,          color: 'text-yellow-500', bg: 'bg-yellow-50' },
   ORCAMENTO_ENVIADO:     { label: 'Orçamento enviado ao cliente',    icon: Send,           color: 'text-sky-500',    bg: 'bg-sky-50' },
   ENVIADO_CHATWOOT:      { label: 'PDF enviado via Chatwoot',        icon: Send,           color: 'text-sky-500',    bg: 'bg-sky-50' },
+  ENVIADO_VENDEDOR_WEBHOOK: { label: 'Orçamento enviado ao vendedor (WhatsApp automático)', icon: Send, color: 'text-emerald-500', bg: 'bg-emerald-50' },
   APROVADO_CLIENTE:      { label: 'Aprovado pelo cliente',           icon: CheckCircle2,   color: 'text-green-500',  bg: 'bg-green-50' },
   RECUSADO:              { label: 'Recusado',                        icon: XCircle,        color: 'text-red-500',    bg: 'bg-red-50' },
   OS_GERADA:             { label: 'OS gerada',                       icon: FileText,       color: 'text-orange-500', bg: 'bg-orange-50' },

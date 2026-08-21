@@ -3,11 +3,12 @@ import {
   X, Copy, User, Phone, MapPin, CreditCard, FileText,
   MessageSquare, Download, Upload, Loader2, CheckCircle2, XCircle,
   ClipboardList, ClipboardCopy, Eye, History, ExternalLink, Printer, Trash2, AlertTriangle, Send,
-  Mail, DollarSign,
+  Mail, DollarSign, MessageCircle,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { enviarParaImpressao, OrderForPrint } from '../lib/printJobs';
 import { logActivity } from '../lib/logActivity';
+import { isEligibleForVendorWebhook, sendQuoteToVendorWebhook } from '../lib/quoteVendorWebhook';
 import { useChatwootUser } from '../contexts/ChatwootUserContext';
 import StatusBadge from './StatusBadge';
 import ApprovalModal, { ApprovalData } from './ApprovalModal';
@@ -172,6 +173,7 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
   const [deletingVersion, setDeletingVersion] = useState(false);
   const [sendingPdfVersion, setSendingPdfVersion] = useState<string | null>(null);
   const [sendingPdfVendedor, setSendingPdfVendedor] = useState<string | null>(null);
+  const [sendingVendorWebhook, setSendingVendorWebhook] = useState(false);
   const [hasOpenQuestions, setHasOpenQuestions] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
@@ -915,6 +917,31 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
     setSendingPdfVendedor(null);
   }
 
+  async function handleEnviarOrcamentoAoVendedor() {
+    if (!quote || !quote.vendedor_nome || !quote.arquivo_orcamento_url) return;
+    setSendingVendorWebhook(true);
+    const result = await sendQuoteToVendorWebhook({
+      vendedorNome: quote.vendedor_nome,
+      arquivoOrcamentoUrl: quote.arquivo_orcamento_url,
+      clienteNome: quote.cliente_nome,
+      codigoOrcamento: quote.codigo_orcamento,
+      quoteId: quote.id,
+    });
+    setToast(result.message);
+    if (result.ok) {
+      logActivity({
+        quote_id: quote.id,
+        action: 'ENVIADO_VENDEDOR_WEBHOOK',
+        message: `Orçamento enviado a ${quote.vendedor_nome} via webhook n8n`,
+        entity_type: 'QUOTE',
+        entity_id: String(quote.id),
+        author: activityAuthor,
+      });
+      setActivitiesKey((k) => k + 1);
+    }
+    setSendingVendorWebhook(false);
+  }
+
   const whatsappHref = quote?.cliente_whatsapp
     ? `https://wa.me/${quote.cliente_whatsapp.replace(/\D/g, '')}`
     : quote?.cliente_telefone
@@ -981,6 +1008,26 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
                   Copiar tudo
                 </button>
                 <div className="flex-1" />
+                {quote && isEligibleForVendorWebhook({
+                  setor: quote.order?.setor ?? setor,
+                  vendedor_nome: quote.vendedor_nome,
+                  status: quote.status,
+                  arquivo_orcamento_url: quote.arquivo_orcamento_url,
+                }) && (
+                  <button
+                    onClick={handleEnviarOrcamentoAoVendedor}
+                    disabled={sendingVendorWebhook}
+                    title="Enviar orçamento ao vendedor via WhatsApp"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {sendingVendorWebhook ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <MessageCircle className="w-3.5 h-3.5" />
+                    )}
+                    Enviar orçamento
+                  </button>
+                )}
                 <button
                   onClick={() => setShowDeleteModal(true)}
                   disabled={quote.status === 'OS_GERADA'}
