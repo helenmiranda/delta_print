@@ -8,7 +8,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { enviarParaImpressao, OrderForPrint } from '../lib/printJobs';
 import { logActivity } from '../lib/logActivity';
-import { isEligibleForVendorWebhook, sendQuoteToVendorWebhook } from '../lib/quoteVendorWebhook';
+import { isEligibleForVendorWebhook, sendQuoteToVendorWebhook, getLatestVersionPdfUrl } from '../lib/quoteVendorWebhook';
 import { useChatwootUser } from '../contexts/ChatwootUserContext';
 import StatusBadge from './StatusBadge';
 import ApprovalModal, { ApprovalData } from './ApprovalModal';
@@ -918,11 +918,12 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
   }
 
   async function handleEnviarOrcamentoAoVendedor() {
-    if (!quote || !quote.vendedor_nome || !quote.arquivo_orcamento_url) return;
+    const pdfUrl = getLatestVersionPdfUrl(versions);
+    if (!quote || !quote.vendedor_nome || !pdfUrl) return;
     setSendingVendorWebhook(true);
     const result = await sendQuoteToVendorWebhook({
       vendedorNome: quote.vendedor_nome,
-      arquivoOrcamentoUrl: quote.arquivo_orcamento_url,
+      pdfUrl,
       clienteNome: quote.cliente_nome,
       codigoOrcamento: quote.codigo_orcamento,
       quoteId: quote.id,
@@ -1012,7 +1013,7 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
                   setor: quote.order?.setor ?? setor,
                   vendedor_nome: quote.vendedor_nome,
                   status: quote.status,
-                  arquivo_orcamento_url: quote.arquivo_orcamento_url,
+                  pdfUrl: getLatestVersionPdfUrl(versions),
                 }) && (
                   <button
                     onClick={handleEnviarOrcamentoAoVendedor}

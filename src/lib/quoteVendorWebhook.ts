@@ -8,15 +8,26 @@ export interface QuoteEligibilityInput {
   setor: string | null | undefined;
   vendedor_nome: string | null | undefined;
   status: string | null | undefined;
-  arquivo_orcamento_url: string | null | undefined;
+  pdfUrl: string | null | undefined;
 }
 
 export function isEligibleForVendorWebhook(q: QuoteEligibilityInput): boolean {
   if (!q.setor || !VENDOR_WEBHOOK_SETORES.includes(q.setor as SetorType)) return false;
   if (!q.vendedor_nome || !(VENDOR_WEBHOOK_VENDEDORES as readonly string[]).includes(q.vendedor_nome)) return false;
   if (!q.status || !(VENDOR_WEBHOOK_STATUSES as readonly string[]).includes(q.status)) return false;
-  if (!q.arquivo_orcamento_url) return false;
+  if (!q.pdfUrl) return false;
   return true;
+}
+
+export interface QuoteVersionForLatestPdf {
+  pdf_url: string | null;
+  version_number: number;
+}
+
+export function getLatestVersionPdfUrl(versions: QuoteVersionForLatestPdf[] | null | undefined): string | null {
+  if (!versions || versions.length === 0) return null;
+  const latest = versions.reduce((max, v) => (v.version_number > max.version_number ? v : max), versions[0]);
+  return latest.pdf_url ?? null;
 }
 
 const VENDEDOR_PHONE_ENV_MAP: Record<string, string | undefined> = {
@@ -26,7 +37,7 @@ const VENDEDOR_PHONE_ENV_MAP: Record<string, string | undefined> = {
 
 export interface SendQuoteToVendorParams {
   vendedorNome: string;
-  arquivoOrcamentoUrl: string;
+  pdfUrl: string;
   clienteNome: string;
   codigoOrcamento: string | null;
   quoteId: number;
@@ -61,7 +72,7 @@ export async function sendQuoteToVendorWebhook(
         vendedor_telefone: telefone,
         cliente_nome: params.clienteNome,
         codigo_orcamento: params.codigoOrcamento,
-        arquivo_orcamento_url: params.arquivoOrcamentoUrl,
+        arquivo_orcamento_url: params.pdfUrl,
         quote_id: params.quoteId,
       }),
     });

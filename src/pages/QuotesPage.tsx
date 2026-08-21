@@ -3,7 +3,7 @@ import { Plus, FileText, Loader2, RefreshCw, Search, X, Printer, DollarSign, Sen
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { enviarParaImpressao, OrderForPrint } from '../lib/printJobs';
-import { isEligibleForVendorWebhook, sendQuoteToVendorWebhook } from '../lib/quoteVendorWebhook';
+import { isEligibleForVendorWebhook, sendQuoteToVendorWebhook, getLatestVersionPdfUrl } from '../lib/quoteVendorWebhook';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
 import NewQuoteModal from '../components/NewQuoteModal';
@@ -35,7 +35,7 @@ interface Quote {
   prioridade: string;
   vendedor_nome: string | null;
   origem: string;
-  arquivo_orcamento_url: string | null;
+  quote_versions?: { pdf_url: string | null; version_number: number }[];
   order?: QuoteOrder | null;
 }
 
@@ -132,7 +132,7 @@ export default function QuotesPage({ setor }: QuotesPageProps) {
         prioridade,
         vendedor_nome,
         origem,
-        arquivo_orcamento_url,
+        quote_versions(pdf_url, version_number),
         order:orders(id, setor, codigo_os, status_os)
       `)
       .eq('setor', setor);
@@ -251,11 +251,12 @@ export default function QuotesPage({ setor }: QuotesPageProps) {
 
   async function handleEnviarOrcamentoVendedor(e: React.MouseEvent, q: Quote) {
     e.stopPropagation();
-    if (!q.vendedor_nome || !q.arquivo_orcamento_url) return;
+    const pdfUrl = getLatestVersionPdfUrl(q.quote_versions);
+    if (!q.vendedor_nome || !pdfUrl) return;
     setSendingVendorWebhookId(q.id);
     const result = await sendQuoteToVendorWebhook({
       vendedorNome: q.vendedor_nome,
-      arquivoOrcamentoUrl: q.arquivo_orcamento_url,
+      pdfUrl,
       clienteNome: q.cliente_nome,
       codigoOrcamento: q.codigo_orcamento,
       quoteId: q.id,
@@ -555,7 +556,7 @@ export default function QuotesPage({ setor }: QuotesPageProps) {
                             setor,
                             vendedor_nome: q.vendedor_nome,
                             status: q.status,
-                            arquivo_orcamento_url: q.arquivo_orcamento_url,
+                            pdfUrl: getLatestVersionPdfUrl(q.quote_versions),
                           }) && (
                             <button
                               onClick={(e) => handleEnviarOrcamentoVendedor(e, q)}
