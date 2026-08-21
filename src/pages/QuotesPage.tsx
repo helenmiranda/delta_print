@@ -132,7 +132,7 @@ export default function QuotesPage({ setor }: QuotesPageProps) {
         prioridade,
         vendedor_nome,
         origem,
-        quote_versions(pdf_url, version_number),
+        quote_versions!quote_versions_quote_id_fkey(pdf_url, version_number),
         order:orders(id, setor, codigo_os, status_os)
       `)
       .eq('setor', setor);
