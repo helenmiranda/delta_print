@@ -11,9 +11,18 @@ export interface QuoteEligibilityInput {
   pdfUrl: string | null | undefined;
 }
 
+export function matchVendorWebhookName(vendedorNome: string | null | undefined): 'Thiago' | 'Marcelo' | null {
+  if (!vendedorNome) return null;
+  const normalized = vendedorNome.trim().toLowerCase();
+  for (const canonical of VENDOR_WEBHOOK_VENDEDORES) {
+    if (normalized.startsWith(canonical.toLowerCase())) return canonical;
+  }
+  return null;
+}
+
 export function isEligibleForVendorWebhook(q: QuoteEligibilityInput): boolean {
   if (!q.setor || !VENDOR_WEBHOOK_SETORES.includes(q.setor as SetorType)) return false;
-  if (!q.vendedor_nome || !(VENDOR_WEBHOOK_VENDEDORES as readonly string[]).includes(q.vendedor_nome)) return false;
+  if (!matchVendorWebhookName(q.vendedor_nome)) return false;
   if (!q.status || !(VENDOR_WEBHOOK_STATUSES as readonly string[]).includes(q.status)) return false;
   if (!q.pdfUrl) return false;
   return true;
@@ -55,11 +64,16 @@ export async function sendQuoteToVendorWebhook(
     return { ok: false, message: 'VITE_N8N_WEBHOOK_ORCAMENTO_URL não configurado. Verifique as variáveis de ambiente.' };
   }
 
-  const telefone = VENDEDOR_PHONE_ENV_MAP[params.vendedorNome];
+  const canonicalVendedor = matchVendorWebhookName(params.vendedorNome);
+  if (!canonicalVendedor) {
+    return { ok: false, message: `Vendedor "${params.vendedorNome}" não é Thiago nem Marcelo.` };
+  }
+
+  const telefone = VENDEDOR_PHONE_ENV_MAP[canonicalVendedor];
   if (!telefone) {
     return {
       ok: false,
-      message: `Telefone de "${params.vendedorNome}" não configurado (verifique VITE_VENDEDOR_WHATSAPP_${params.vendedorNome.toUpperCase()}).`,
+      message: `Telefone de "${canonicalVendedor}" não configurado (verifique VITE_VENDEDOR_WHATSAPP_${canonicalVendedor.toUpperCase()}).`,
     };
   }
 
