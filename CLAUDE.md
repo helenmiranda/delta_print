@@ -46,6 +46,7 @@ VITE_VENDEDOR_WHATSAPP=          # número fixo do vendedor (ex: 5511999999999)
 VITE_VENDEDOR_WHATSAPP_THIAGO=   # WhatsApp do vendedor Thiago (ex: 5511999999999)
 VITE_VENDEDOR_WHATSAPP_MARCELO=  # WhatsApp do vendedor Marcelo
 VITE_N8N_WEBHOOK_ORCAMENTO_URL=  # URL do webhook n8n que dispara o WhatsApp do orçamento pronto
+VITE_N8N_WEBHOOK_DUVIDA_URL=     # URL do webhook n8n que avisa o vendedor sobre duvida de orcamento
 ```
 
 ---
@@ -265,9 +266,9 @@ O número de destino é fixo: `VITE_VENDEDOR_WHATSAPP`.
 
 Botão "Enviar orçamento" em `QuotesPage.tsx` (linha da tabela) e `QuoteDrawer.tsx` (cabeçalho). Regra de elegibilidade centralizada em `src/lib/quoteVendorWebhook.ts`. Visível apenas quando TODAS as condições abaixo são verdadeiras:
 - setor ∈ { GRAFICA_INDUSTRIAL, GRAFICA_EXPRESSA } (não aparece em COMUNICA_VISUAL)
-- vendedor_nome ∈ { "Thiago", "Marcelo" }
+- vendedor_nome começa com "Thiago" ou "Marcelo" (case-insensitive, via `matchVendorWebhookName()` — cobre variações como "Thiago S", "Thiago Antônio Duarte")
 - status ∈ { PRONTO_PARA_ENVIAR, ORCAMENTO_ENVIADO }
-- arquivo_orcamento_url presente
+- PDF presente na versão mais recente do orçamento (`quote_versions.pdf_url`, via `getLatestVersionPdfUrl()`)
 
 Ao clicar, dispara:
 ```
@@ -275,7 +276,16 @@ POST {VITE_N8N_WEBHOOK_ORCAMENTO_URL}
 Body: { vendedor_nome, vendedor_telefone, cliente_nome, codigo_orcamento, arquivo_orcamento_url, quote_id }
 ```
 
-O destino da mensagem WhatsApp é o **celular do próprio vendedor** (Thiago/Marcelo), resolvido via `VITE_VENDEDOR_WHATSAPP_THIAGO` / `VITE_VENDEDOR_WHATSAPP_MARCELO` — não é o WhatsApp do cliente. O n8n recebe o payload e decide como formatar/enviar a mensagem final.
+O destino da mensagem WhatsApp é o **celular do próprio vendedor** (Thiago/Marcelo), resolvido via `VITE_VENDEDOR_WHATSAPP_THIAGO` / `VITE_VENDEDOR_WHATSAPP_MARCELO` — não é o WhatsApp do cliente. O n8n recebe o payload e decide como formatar/enviar a mensagem final (hoje via WAHA).
+
+### Aviso de dúvida ao vendedor (webhook n8n)
+
+Quando um comentário é marcado como dúvida em `QuoteComments.tsx` (checkbox "É uma dúvida"), o orçamento vai para `AJUSTE_NECESSARIO` e, se `vendedor_nome` bater Thiago/Marcelo, dispara:
+```
+POST {VITE_N8N_WEBHOOK_DUVIDA_URL}
+Body: { quote_id, quote_comment_id, vendedor_nome, vendedor_telefone, cliente_nome, codigo_orcamento, mensagem_duvida }
+```
+O n8n envia a mensagem via WAHA com uma tag `[Q{quote_id}]` no final, e correlaciona a resposta do vendedor consultando o histórico da conversa no WAHA (com fallback de contagem de dúvidas pendentes na tabela `quote_whatsapp_threads`, ver `supabase/migrations/20260821000000_create_quote_whatsapp_threads.sql`), pedindo confirmação por texto ("responda 'sim'") antes de gravar a resposta como comentário e voltar o status para `PENDENTE_ORCAMENTO`. O workflow do n8n em si (tag, busca no histórico, confirmação) não faz parte deste repositório.
 
 ---
 

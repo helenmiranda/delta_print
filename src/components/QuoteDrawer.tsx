@@ -400,6 +400,43 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
         console.error('N8N webhook exception', webhookError);
         setToast('Falha ao enviar para leitura automatica');
       }
+
+      const autoSendSetor = quote.order?.setor ?? setor;
+      if (isEligibleForVendorWebhook({
+        setor: autoSendSetor,
+        vendedor_nome: quote.vendedor_nome,
+        status: 'PRONTO_PARA_ENVIAR',
+        pdfUrl: newVersion!.pdf_url,
+      })) {
+        const autoSendQuoteId = quote.id;
+        const autoSendVersionId = newVersion!.id;
+        const autoSendPdfUrl = newVersion!.pdf_url!;
+        const autoSendVendedorNome = quote.vendedor_nome!;
+        const autoSendClienteNome = quote.cliente_nome;
+        const autoSendCodigoOrcamento = quote.codigo_orcamento;
+
+        setTimeout(async () => {
+          const result = await sendQuoteToVendorWebhook({
+            vendedorNome: autoSendVendedorNome,
+            pdfUrl: autoSendPdfUrl,
+            clienteNome: autoSendClienteNome,
+            codigoOrcamento: autoSendCodigoOrcamento,
+            quoteId: autoSendQuoteId,
+          });
+          setToast(result.message);
+          if (result.ok) {
+            logActivity({
+              quote_id: autoSendQuoteId,
+              action: 'ENVIADO_VENDEDOR_WEBHOOK',
+              message: `Orçamento enviado automaticamente a ${autoSendVendedorNome} via WhatsApp após upload`,
+              entity_type: 'QUOTE_VERSION',
+              entity_id: String(autoSendVersionId),
+              author: activityAuthor,
+            });
+            setActivitiesKey((k) => k + 1);
+          }
+        }, 10000);
+      }
     } catch (error: any) {
       console.error('Error uploading PDF:', error);
       const msg = error?.message ?? '';
@@ -1318,15 +1355,37 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
                       <History className="w-3.5 h-3.5" />
                       Versoes de orcamento
                     </h3>
-                    {versions.length > 0 && !showUploadArea && (
-                      <button
-                        onClick={() => setShowUploadArea(true)}
-                        className="text-xs text-primary-500 hover:text-primary-700 font-medium flex items-center gap-1 transition-colors"
-                      >
-                        <Upload className="w-3 h-3" />
-                        Nova versao
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {quote && isEligibleForVendorWebhook({
+                        setor: quote.order?.setor ?? setor,
+                        vendedor_nome: quote.vendedor_nome,
+                        status: quote.status,
+                        pdfUrl: getLatestVersionPdfUrl(versions),
+                      }) && (
+                        <button
+                          onClick={handleEnviarOrcamentoAoVendedor}
+                          disabled={sendingVendorWebhook}
+                          title="Enviar orçamento ao vendedor via WhatsApp"
+                          className="inline-flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {sendingVendorWebhook ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <MessageCircle className="w-3 h-3" />
+                          )}
+                          Enviar orçamento
+                        </button>
+                      )}
+                      {versions.length > 0 && !showUploadArea && (
+                        <button
+                          onClick={() => setShowUploadArea(true)}
+                          className="text-xs text-primary-500 hover:text-primary-700 font-medium flex items-center gap-1 transition-colors"
+                        >
+                          <Upload className="w-3 h-3" />
+                          Nova versao
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="space-y-2">
@@ -1667,6 +1726,9 @@ export default function QuoteDrawer({ quoteId, onClose, onUpdated, onVersionsLoa
                 <QuoteComments
                   quoteId={quote.id}
                   quoteVersionId={quote.approved_quote_version_id}
+                  vendedorNome={quote.vendedor_nome}
+                  clienteNome={quote.cliente_nome}
+                  codigoOrcamento={quote.codigo_orcamento}
                   onToast={setToast}
                   onStatusChange={async (newStatus) => {
                     const { data } = await supabase

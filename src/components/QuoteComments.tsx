@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { MessageSquare, Send, Loader2, CheckCircle2, HelpCircle, CheckCheck, Pencil, X, Check } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useChatwootUser } from '../contexts/ChatwootUserContext';
+import { matchVendorWebhookName, sendQuoteDuvidaToVendorWebhook } from '../lib/quoteVendorWebhook';
 
 interface QuoteComment {
   id: number;
@@ -34,6 +35,9 @@ function formatCommentDate(iso: string) {
 interface QuoteCommentsProps {
   quoteId: number;
   quoteVersionId?: string | null;
+  vendedorNome?: string | null;
+  clienteNome?: string | null;
+  codigoOrcamento?: string | null;
   onToast: (msg: string) => void;
   onStatusChange?: (newStatus: string) => void;
   onPendingCountChange?: () => void;
@@ -48,6 +52,9 @@ interface EditState {
 export default function QuoteComments({
   quoteId,
   quoteVersionId,
+  vendedorNome,
+  clienteNome,
+  codigoOrcamento,
   onToast,
   onStatusChange,
   onPendingCountChange,
@@ -153,17 +160,23 @@ export default function QuoteComments({
     if (!message.trim() || !chatwootUser) return;
     setSending(true);
 
-    const { error } = await supabase.from('quote_comments').insert({
-      quote_id: quoteId,
-      quote_version_id: quoteVersionId ? parseInt(quoteVersionId, 10) : null,
-      message: message.trim(),
-      is_question: isQuestion,
-      is_resolved: false,
-      author_chatwoot_user_id: chatwootUser.id,
-      author_name: chatwootUser.name,
-      author_email: chatwootUser.email,
-      author_account_id: chatwootUser.account_id,
-    });
+    const trimmedMessage = message.trim();
+
+    const { data: insertedComment, error } = await supabase
+      .from('quote_comments')
+      .insert({
+        quote_id: quoteId,
+        quote_version_id: quoteVersionId ? parseInt(quoteVersionId, 10) : null,
+        message: trimmedMessage,
+        is_question: isQuestion,
+        is_resolved: false,
+        author_chatwoot_user_id: chatwootUser.id,
+        author_name: chatwootUser.name,
+        author_email: chatwootUser.email,
+        author_account_id: chatwootUser.account_id,
+      })
+      .select()
+      .single();
 
     if (error) {
       onToast('Erro ao enviar comentario');
@@ -186,6 +199,20 @@ export default function QuoteComments({
         onToast('Comentario salvo, mas nao foi possivel atualizar o status');
       } else {
         onStatusChange?.('AJUSTE_NECESSARIO');
+
+        if (vendedorNome && matchVendorWebhookName(vendedorNome) && insertedComment) {
+          const webhookResult = await sendQuoteDuvidaToVendorWebhook({
+            vendedorNome,
+            clienteNome: clienteNome ?? '',
+            codigoOrcamento: codigoOrcamento ?? null,
+            quoteId,
+            quoteCommentId: insertedComment.id,
+            mensagemDuvida: trimmedMessage,
+          });
+          if (!webhookResult.ok) {
+            onToast(`Duvida salva, mas o aviso ao vendedor falhou: ${webhookResult.message}`);
+          }
+        }
       }
     }
 
